@@ -159,3 +159,14 @@ def parse_payload(path):
     if not m:
         return None
     return json.loads(m.group(1))
+
+# --- meeting-id discovery ---------------------------------------------------
+
+def find_meeting_dirs(repo, date):
+    """Existing meeting dirs whose name starts with the date (for the skill's
+    discover-or-create step). Returns sorted Paths under <repo>/meetings/."""
+    base = Path(repo) / "meetings"
+    if not base.is_dir():
+        return []
+    return sorted(p for p in base.iterdir()
+                  if p.is_dir() and p.name.startswith(date + "-"))

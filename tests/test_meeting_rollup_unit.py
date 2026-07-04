@@ -1,5 +1,5 @@
 from lib.meeting_rollup import (slugify, normalize, content_hash, merge,
-                                render, parse_payload, SENTINEL)
+                                render, parse_payload, SENTINEL, find_meeting_dirs)
 
 
 def test_slugify_lowercases_and_hyphenates():
@@ -123,3 +123,15 @@ def test_parse_payload_returns_none_without_block(tmp_path):
     f = tmp_path / "plain.md"
     f.write_text("# Just prose\nno data here\n")
     assert parse_payload(f) is None
+
+
+def test_find_meeting_dirs_matches_date_prefix(tmp_path):
+    meetings = tmp_path / "meetings"
+    (meetings / "2026-07-04-standup").mkdir(parents=True)
+    (meetings / "2026-07-04-retro").mkdir()
+    (meetings / "2026-07-05-planning").mkdir()
+    got = sorted(p.name for p in find_meeting_dirs(tmp_path, "2026-07-04"))
+    assert got == ["2026-07-04-retro", "2026-07-04-standup"]
+
+def test_find_meeting_dirs_empty_when_no_meetings_dir(tmp_path):
+    assert find_meeting_dirs(tmp_path, "2026-07-04") == []

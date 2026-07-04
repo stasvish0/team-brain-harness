@@ -24,10 +24,13 @@ def read_allowlist(path):
                 lines.append(line)
     return lines
 
-def publish(repo, message, allow_paths, remote="origin", branch="main", max_retries=5):
-    """Stage allowlisted paths, commit if there is anything, then push with
-    fetch->rebase->retry so a concurrent push is caught up to, never clobbered."""
-    stage_allowlist(repo, allow_paths)
+def push_paths(repo, message, paths, remote="origin", branch="main", max_retries=5):
+    """Stage the given pathspecs (a directory pathspec also captures deletions),
+    commit if anything is staged, then push with fetch->rebase->retry so a
+    concurrent push is caught up to, never clobbered. Raises on a real conflict."""
+    for p in paths:
+        # check=False so a missing/empty pathspec does not abort the whole push
+        run_git(repo, "add", "--", p, check=False)
     staged = run_git(repo, "diff", "--cached", "--name-only").stdout.strip()
     if not staged:
         return "nothing-to-publish"
@@ -41,8 +44,14 @@ def publish(repo, message, allow_paths, remote="origin", branch="main", max_retr
         rebase = run_git(repo, "rebase", f"{remote}/{branch}", check=False)
         if rebase.returncode != 0:
             run_git(repo, "rebase", "--abort", check=False)
-            raise RuntimeError("publish: rebase conflict on a shared file; needs manual resolution")
-    raise RuntimeError("publish: push failed after retries")
+            raise RuntimeError("push_paths: rebase conflict on a shared file; needs manual resolution")
+    raise RuntimeError("push_paths: push failed after retries")
+
+def publish(repo, message, allow_paths, remote="origin", branch="main", max_retries=5):
+    """Publish allowlisted shared paths. Thin wrapper over push_paths so the
+    allowlist stays the single source of truth for what a member may share."""
+    return push_paths(repo, message, allow_paths, remote=remote, branch=branch,
+                      max_retries=max_retries)
 
 def pull(repo, remote="origin", branch="main"):
     """Session-start pull. Rebase local (unpushed) work on top of remote.
