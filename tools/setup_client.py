@@ -1,8 +1,14 @@
-import shutil, subprocess
+import shutil, subprocess, sys
 from pathlib import Path
-from lib.gitsync import run_git
 
 ROOT = Path(__file__).resolve().parents[1]
+# Allow running as a script (python3 tools/setup_client.py <remote-url> <dest>)
+# from any cwd: ensure the repo root is importable so `lib.gitsync` resolves.
+# Under pytest this is already on the path via pyproject's pythonpath=["."].
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from lib.gitsync import run_git
 CLIENT_KIT = ROOT / "client-kit"
 LIB = ROOT / "lib"
 
@@ -29,3 +35,9 @@ def setup_client(remote_url, dest):
     exclude = dest / ".git" / "info" / "exclude"
     exclude.write_text("/private/\n/lib/\n/.claude/\n/publish_allowlist.txt\n")
     return dest
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("usage: python3 tools/setup_client.py <remote-url> <dest>", file=sys.stderr)
+        raise SystemExit(2)
+    print(setup_client(sys.argv[1], sys.argv[2]))
