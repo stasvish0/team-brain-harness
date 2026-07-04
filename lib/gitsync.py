@@ -22,3 +22,23 @@ def read_allowlist(path):
         if line:
             lines.append(line)
     return lines
+
+def publish(repo, message, allow_paths, remote="origin", branch="main", max_retries=5):
+    """Stage allowlisted paths, commit if there is anything, then push with
+    fetch->rebase->retry so a concurrent push is caught up to, never clobbered."""
+    stage_allowlist(repo, allow_paths)
+    staged = run_git(repo, "diff", "--cached", "--name-only").stdout.strip()
+    if not staged:
+        return "nothing-to-publish"
+    run_git(repo, "commit", "-m", message)
+    for _ in range(max_retries):
+        push = run_git(repo, "push", remote, branch, check=False)
+        if push.returncode == 0:
+            return "pushed"
+        # rejected (likely non-fast-forward): catch up and retry
+        run_git(repo, "fetch", remote, branch)
+        rebase = run_git(repo, "rebase", f"{remote}/{branch}", check=False)
+        if rebase.returncode != 0:
+            run_git(repo, "rebase", "--abort", check=False)
+            raise RuntimeError("publish: rebase conflict on a shared file; needs manual resolution")
+    raise RuntimeError("publish: push failed after retries")
