@@ -65,10 +65,12 @@ The harness owns the deterministic, unit-tested plumbing: meeting-id helpers, th
 For contributions to merge they must land in the same `meetings/<id>/`. The id is `YYYY-MM-DD-<slug>`. Because a session may be hours old, the skill first refreshes the tree (`git fetch` + rebase, or a pull) so it discovers meeting dirs other members have already published, then lists existing meeting directories for the date (`find_meeting_dirs`) and reuses a matching one, reconciling title variants ("standup" vs "daily standup") with assistant judgment; it creates a new id only when nothing matches. This is generic (no calendar or transcript-tool dependency) and converges as members sync. Accepted tradeoff: if two members create different ids for the same meeting before either has synced (even after the pre-write refresh, if they act within the same unsynced window), two meeting directories result and are reconciled by a human later. A future helper could detect near-duplicate meeting dirs and propose a merge.
 
 ### 4.3 Inbox contribution: structured payload
-An inbox contribution is a small file whose YAML front-matter is a structured payload (`decisions`, `action_items` as `{owner, text}`, `notes`, plus `meeting_id`, `title`, `date`, `author`). Structured input makes the merge trivial and bulletproof rather than requiring Markdown scraping. Inbox files are ephemeral, so they are optimized for machine-merging, not for reading.
+An inbox contribution is a small file carrying a structured JSON payload (`decisions`, `action_items` as `{owner, text}`, `notes`, plus `meeting_id`, `title`, `date`, `author`). Structured input makes the merge trivial and bulletproof rather than requiring Markdown scraping. Inbox files are ephemeral, so they are optimized for machine-merging, not for reading.
 
-### 4.4 Canonical note: YAML front-matter is the source of truth
-The canonical note is one Markdown file. Its YAML front-matter holds the merged structured payload plus a `merged_authors` ledger; its body is the rendered human-readable sections. Re-merge reads the front-matter (not the prose), so it stays deterministic. This matches the front-matter convention used elsewhere in the system.
+### 4.4 Canonical note: an embedded JSON payload is the source of truth
+The canonical note is one Markdown file with two parts: a human-readable rendered body (the sections), and a machine-readable **fenced JSON block** (after a sentinel comment) holding the merged structured payload plus a `merged_authors` ledger. Re-merge reads the JSON block (not the prose), so it stays deterministic.
+
+**Serialization decision (deviation from an earlier "YAML front-matter" phrasing):** the payload is serialized with stdlib `json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2)` plus a trailing newline. This keeps the harness zero-dependency (git + Python stdlib only, no PyYAML for members to install), safely round-trips arbitrary text (colons, quotes, unicode) that a hand-rolled YAML emitter would mishandle, and is itself the "pinned canonical serializer" (see 5.2): `sort_keys` + fixed `indent` make two independent renders of the same payload byte-identical.
 
 The `merged_authors` ledger is **load-bearing for idempotency, not decorative**. Each entry is `{author, content_hash}`, where `content_hash` is defined in 5.2. On roll-up, a contribution whose `content_hash` is already in the ledger has already been folded: its items are not re-added; the inbox file is simply cleaned up. Only contributions with a hash absent from the ledger fold in. If no contribution carries a new hash, roll-up is a no-op (no rewrite, no commit). This is what makes re-running safe even when a prior roll-up's push failed and left the inbox in place.
 
@@ -86,10 +88,10 @@ Pure, testable functions plus one repo-touching driver:
 - `slugify(title) -> str` — deterministic slug for meeting ids and filenames.
 - `find_meeting_dirs(repo, date) -> list[Path]` — existing meeting dirs for a date (input to discover-or-create).
 - `normalize(text) -> str` — lowercase, collapse whitespace, strip trailing punctuation; used for dedupe keys.
-- `parse_contribution(path) -> Contribution` / `parse_canonical(path) -> Canonical | None` — load structured payloads from front-matter.
-- `content_hash(contribution) -> str` — stable hash over the canonicalized payload (definition in 5.2).
-- `merge(existing: Canonical | None, contributions: list[Contribution]) -> Canonical` — the deterministic core (rules below); folds only contributions whose hash is absent from the existing ledger.
-- `render(canonical: Canonical) -> str` — front-matter + rendered Markdown body, with the total ordering from 5.2.
+- `parse_payload(path) -> dict | None` — locate the sentinel + fenced JSON block and `json.loads` it (used for both inbox contributions and canonical notes); returns None when no block is present.
+- `content_hash(payload) -> str` — stable hash over the canonicalized payload (definition in 5.2).
+- `merge(existing: dict | None, contributions: list[dict]) -> dict` — the deterministic core (rules below); folds only contributions whose hash is absent from the existing ledger.
+- `render(canonical: dict) -> str` — rendered Markdown body + sentinel + pinned JSON block, with the total ordering from 5.2.
 - `roll_up(repo, meeting_dir) -> bool` — read canonical + all `_inbox/*.md`, merge new-hash contributions, write canonical, delete the folded inbox files. Deletion is coupled to folding: when there are zero new-hash contributions it touches nothing and returns False (so the caller skips the commit and the worktree stays clean); otherwise it returns True.
 
 ### 5.2 Merge rules (deterministic, idempotent)
@@ -98,55 +100,67 @@ Pure, testable functions plus one repo-touching driver:
 - **action_items:** dedupe by `(normalize(owner), normalize(text))`; union `by`.
 - **notes:** union, dedupe by `normalize(text)`.
 - **ledger:** append each folded contribution as `{author, content_hash}` to `merged_authors`. A same-author re-run adds a second entry (a second hash) for that author; that is expected. The ledger keeps all entries (it is the skip-guard for already-folded contributions), and its sort key is the total `(author_id, content_hash)` so ordering is deterministic even with multiple entries per author.
-- **`content_hash` definition:** `sha256` (hex, first 12 chars in examples) over a **canonicalized serialization of the payload fields only** (`decisions`, `action_items`, `notes`): each list normalized (`normalize` applied to text and owner) and sorted by its dedupe key, serialized with sorted keys and single-space-collapsed whitespace, excluding volatile metadata (`title`, `date`, `author`). This makes the hash stable across YAML serializers and independent of key ordering, so two authors who summarized identically hash identically.
-- **deterministic output ordering:** `render` and the front-matter both impose a total order on every list: `decisions` and `notes` sorted by `normalize(text)`; `action_items` grouped by owner then sorted by `normalize(text)`; `by` lists sorted by author-id; `merged_authors` sorted by `(author_id, content_hash)`. Union order must never depend on contribution processing order.
-- **pinned canonical serializer:** all output (both the YAML front-matter and the rendered body) MUST go through a single canonical serializer with fixed emitter settings: block style (no flow maps), explicit key order matching the schema, LF newlines, one trailing newline, no line-wrapping. Byte-identity is a property of *this serializer plus the ordering above*, not of the merge logic alone. A unit test asserts two independent renders of the same `Canonical` are byte-identical.
+- **`content_hash` definition:** `sha256` (hex, first 12 chars in examples) over a **canonicalized serialization of the payload fields only** (`decisions`, `action_items`, `notes`): each list normalized (`normalize` applied to text and owner) and sorted by its dedupe key, then `json.dumps(..., sort_keys=True, ensure_ascii=False)`, excluding volatile metadata (`title`, `date`, `author`) and excluding `by` attribution. This makes the hash stable and independent of key ordering, so two authors who summarized identically hash identically.
+- **deterministic output ordering:** `render` imposes a total order on every list: `decisions` and `notes` sorted by `normalize(text)`; `action_items` grouped by owner then sorted by `normalize(text)`; `by` lists sorted by author-id; `merged_authors` sorted by `(author_id, content_hash)`. Union order must never depend on contribution processing order.
+- **pinned canonical serializer:** the machine JSON block is emitted with `json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2)` + trailing newline; the rendered body is generated deterministically from the ordered payload. Byte-identity is a property of *this serializer plus the ordering above*, not of the merge logic alone. A unit test asserts two independent renders of the same payload are byte-identical.
 - **idempotency:** merge output is a pure function of `(existing canonical, contributions)`. Re-running with no new-hash contributions is a no-op (no commit). A late contribution (new author, or a same-author re-run with changed wording) carries a new hash and folds into the same note.
 - **concurrency safety does not depend on byte-identity.** The correctness guarantee is the per-meeting transaction with reset-to-remote-tip on failure (4.5): nothing is lost or double-counted regardless of serialization. Byte-identity is only an optimization: when two clients render identical bytes, one client's rebase drops as an empty commit (the clean common case); when they differ, the loser resets and finds the work already done. Both paths are safe.
 
 ### 5.3 Data formats
-Inbox contribution `meetings/<id>/_inbox/<author>.md`:
-```yaml
----
-meeting_id: 2026-07-04-standup
-title: Daily Standup
-date: 2026-07-04
-author: alice
-decisions: ["Ship v2 behind a flag"]
-action_items:
-  - {owner: bob, text: "Wire the feature flag"}
-  - {owner: alice, text: "Draft rollout comms"}
-notes: ["Discussed staging capacity"]
----
+A single sentinel comment marks the machine block in every file: `<!-- team-brain-harness:rollup-data -->`, immediately followed by a fenced ```json block. Parsers locate the sentinel and load the fenced JSON; everything before it is human-facing text (empty in inbox files).
+
+Inbox contribution `meetings/<id>/_inbox/<author-id>.md` (payload only; ephemeral):
+```
+<!-- team-brain-harness:rollup-data -->
+```json
+{
+  "meeting_id": "2026-07-04-standup",
+  "title": "Daily Standup",
+  "date": "2026-07-04",
+  "author": "alice",
+  "decisions": ["Ship v2 behind a flag"],
+  "action_items": [
+    {"owner": "bob", "text": "Wire the feature flag"},
+    {"owner": "alice", "text": "Draft rollout comms"}
+  ],
+  "notes": ["Discussed staging capacity"]
+}
+```(closing fence)
 ```
 
-Canonical note `meetings/<id>/<slug>.md`:
-```yaml
----
-meeting_id: 2026-07-04-standup
-title: Daily Standup
-date: 2026-07-04
-merged_authors:
-  - {author: alice, content_hash: ab12...}
-  - {author: bob,   content_hash: cd34...}
-decisions:
-  - {text: "Ship v2 behind a flag", by: [alice, bob]}
-action_items:
-  - {owner: bob, text: "Wire the feature flag", by: [alice]}
-notes:
-  - {text: "Discussed staging capacity", by: [alice]}
----
+Canonical note `meetings/<id>/<slug>.md` (rendered body + machine block):
+```
 # Daily Standup - 2026-07-04
+
 ## Decisions
 - Ship v2 behind a flag
+
 ## Action items
-### bob
-- Wire the feature flag
 ### alice
 - Draft rollout comms
+### bob
+- Wire the feature flag
+
 ## Notes
 - Discussed staging capacity
+
+<!-- team-brain-harness:rollup-data -->
+```json
+{
+  "meeting_id": "2026-07-04-standup",
+  "title": "Daily Standup",
+  "date": "2026-07-04",
+  "merged_authors": [
+    {"author": "alice", "content_hash": "ab12..."},
+    {"author": "bob", "content_hash": "cd34..."}
+  ],
+  "decisions": [{"by": ["alice", "bob"], "text": "Ship v2 behind a flag"}],
+  "action_items": [{"by": ["alice"], "owner": "bob", "text": "Wire the feature flag"}],
+  "notes": [{"by": ["alice"], "text": "Discussed staging capacity"}]
+}
+```(closing fence)
 ```
+(Object keys shown in `sort_keys=True` order; the `(closing fence)` annotation stands in for a literal ```` ``` ```` so this example can nest in the spec.)
 
 ### 5.4 Shared push helper in `lib/gitsync.py`
 Factor the fetch-rebase-retry push loop out of `publish` into a helper that stages a given set of paths **including deletions** (roll-up both writes the canonical note and deletes inbox files). Deletions are captured by staging the **directory pathspec** (`git add -- meetings/<id>/`), which records added, modified, and removed tracked files under it, rather than adding now-deleted file paths individually (which some git versions treat as a no-op that misses the removal). The staged pathset for a roll-up is constructed **only** from paths under `meetings/<id>/`, so it can never include a `private/` path; combined with the gitignore on `private/`, that makes the "never carries anything private" invariant explicit rather than incidental. Both `publish` and roll-up call the helper. Its own conflict behavior (rebase abort, raise) is unchanged; the roll-up driver (5.6) wraps a raised failure in the reset-to-remote-tip cleanup from 4.5 so the worktree is left clean for the next per-meeting transaction and the next `pull`.
