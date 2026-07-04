@@ -23,7 +23,7 @@
 - `tests/test_meeting_rollup_unit.py` — unit tests for the pure functions.
 - `tests/test_meeting_rollup_integration.py` — `roll_up()` against a temp git repo.
 - `tests/test_rollup_e2e.py` — two contributors + a third client's session-start roll-up, end to end.
-- `CONTROL/skills/process-meeting/SKILL.md` — the thin skill (lives in the monorepo's `CONTROL/skills/` so `instantiate.py` vendors it into a live hive, then it reaches clients via the existing skills sync). NOTE: sub-project 1 did not create a monorepo-level `CONTROL/skills/`; create the directory as part of this task.
+- `client-kit/.claude/skills/process-meeting/SKILL.md` — the thin skill. Placed under `client-kit/.claude/` so `setup_client.py` (which copies `client-kit/.claude/` wholesale into each client) delivers it to every member immediately, exactly like the hooks. It lands local-only in the clone (the client's `.git/info/exclude` ignores `/.claude/`), which is correct: a skill is client tooling, not shared hive content. NOTE: the canonical shared-skills home (`client-kit/skills/` -> hive `CONTROL/skills/`) and its control-plane distribution to clients is a sub-project-3 concern; this direct placement is the working delivery path for now.
 
 **Modify:**
 - `lib/gitsync.py` — extract the fetch-rebase-retry push loop from `publish` into a reusable `push_paths(repo, message, paths, remote, branch, max_retries)` that stages a directory pathspec set (capturing deletions) and pushes; `publish` keeps its allowlist behavior by delegating to it. Add nothing to `pull`.
@@ -376,12 +376,14 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 # add to tests/test_meeting_rollup_unit.py
 from lib.meeting_rollup import render, parse_payload, merge, SENTINEL
 
-def test_render_is_byte_identical_for_same_payload(tmp_path):
-    a = _contrib("bob", decisions=["B decision", "A decision"], notes=["z", "a"])
-    b = _contrib("alice", decisions=["A decision", "B decision"], notes=["a", "z"])
+def test_render_is_byte_identical_regardless_of_processing_order(tmp_path):
+    # two DISTINCT-content contributions (distinct content_hash) so both fold in
+    # both orders; the total ordering in render makes the output byte-identical.
+    a = _contrib("alice", decisions=["B decision"], notes=["z note"])
+    b = _contrib("bob", decisions=["A decision"], notes=["a note"])
     p1 = merge(None, [a, b])
     p2 = merge(None, [b, a])  # different processing order
-    assert render(p1) == render(p2)  # ordering makes them identical
+    assert render(p1) == render(p2)
 
 def test_render_body_has_sections_and_sorted_items():
     p = merge(None, [_contrib("alice", decisions=["B", "A"])])
@@ -725,41 +727,47 @@ Expected: FAIL with `ImportError: cannot import name 'roll_up'`.
 ```python
 # add to lib/meeting_rollup.py
 def _canonical_path(meeting_dir):
-    existing = [p for p in Path(meeting_dir).glob("*.md")]
-    if existing:
-        return existing[0]
-    name = Path(meeting_dir).name
+    """Deterministic canonical-note path: prefer the slug derived from the dir
+    name; if that file exists reuse it; else if some other top-level .md exists
+    (a stray) use the sorted-first; else the derived path."""
+    meeting_dir = Path(meeting_dir)
+    name = meeting_dir.name
     slug = name[len("YYYY-MM-DD-"):] if len(name) > 11 and name[10] == "-" else ""
-    return Path(meeting_dir) / (f"{slug}.md" if slug else "meeting.md")
+    derived = meeting_dir / (f"{slug}.md" if slug else "meeting.md")
+    if derived.exists():
+        return derived
+    existing = sorted(meeting_dir.glob("*.md"))  # non-recursive: excludes _inbox/
+    return existing[0] if existing else derived
 
 def roll_up(repo, meeting_dir):
     meeting_dir = Path(meeting_dir)
     inbox = meeting_dir / "_inbox"
     contrib_files = sorted(inbox.glob("*.md")) if inbox.is_dir() else []
-    if not contrib_files:
+    # parse once, keep (file, payload) pairs aligned; drop unparseable files
+    pairs = [(f, parse_payload(f)) for f in contrib_files]
+    pairs = [(f, c) for f, c in pairs if c is not None]
+    if not pairs:
         return False
-    contributions = [parse_payload(f) for f in contrib_files]
-    contributions = [c for c in contributions if c is not None]
     canon_path = _canonical_path(meeting_dir)
     existing = parse_payload(canon_path) if canon_path.exists() else None
     known = set(e["content_hash"] for e in (existing or {}).get("merged_authors", []))
-    new = [c for c in contributions if content_hash(c) not in known]
+    new = [c for _, c in pairs if content_hash(c) not in known]
     if not new:
-        return False
+        return False  # nothing new -> touch nothing, worktree stays clean
     merged = merge(existing, new)
     canon_path.write_text(render(merged))
-    for f in contrib_files:
-        if content_hash(parse_payload(f)) not in known:
-            f.unlink()
-    # remove an empty inbox dir so the tree has no stray empty folders
+    # every parsed contribution is now reflected in canonical (folded or already
+    # known), so delete them all; unparseable files (excluded above) are left alone
+    for f, _ in pairs:
+        f.unlink()
     try:
-        inbox.rmdir()
+        inbox.rmdir()  # drop the now-empty inbox dir; harmless if not empty
     except OSError:
         pass
     return True
 ```
 
-Note on the delete loop: it deletes every contribution file whose hash was folded now OR was already known (both are "reflected in canonical"), so a stray already-folded file gets cleaned up as part of a real transaction (never as an uncommitted no-op, because we only reach here when `new` is non-empty). Re-read the file's hash before deleting to be explicit.
+Note: the delete uses the already-parsed `pairs` (no second re-parse). We only reach the delete when `new` is non-empty, so cleanup always happens inside a real (to-be-committed) transaction, never as an uncommitted no-op.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -802,9 +810,10 @@ def test_roll_up_all_pushes_canonical_and_clears_inbox(bare_remote, tmp_path):
     _write_contrib(mdir, "bob", _contrib_payload("bob", notes=["Staging tight"]))
     push_paths(a, "inbox", ["meetings/"])  # contributions are at the remote tip
 
-    # a second client pulls and rolls up
+    # a second client pulls (mirrors the hook: pull THEN roll up) and rolls up
     from lib.gitsync import pull
     b = _clone(bare_remote, tmp_path / "b")
+    pull(b)  # exercises the fetch-before-rollup contract the reset invariant relies on
     results = roll_up_all(b)
     assert ("2026-07-04-standup", "pushed") in results
 
@@ -987,10 +996,10 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 10: The `/process-meeting` skill
 
 **Files:**
-- Create: `CONTROL/skills/process-meeting/SKILL.md`
-- (Create the `CONTROL/skills/` directory in the monorepo if absent.)
+- Create: `client-kit/.claude/skills/process-meeting/SKILL.md`
+- (Create the `client-kit/.claude/skills/` directory if absent.)
 
-**Context:** This is a thin, assistant-facing skill (Markdown instructions, not harness code). It documents the flow the assistant follows on a member's machine. It must reference the harness helpers (`slugify`, `find_meeting_dirs`) and the exact contribution file format. There is no test for a Markdown skill; correctness is that it matches the data format Task 4/7 parse. Verify by re-reading the format against `lib/meeting_rollup.py`.
+**Context:** This is a thin, assistant-facing skill (Markdown instructions, not harness code). It documents the flow the assistant follows on a member's machine. It must reference the harness helpers (`slugify`, `find_meeting_dirs`) and the exact contribution file format. There is no test for a Markdown skill; correctness is that it matches the data format Task 4/7 parse. Verify by re-reading the format against `lib/meeting_rollup.py`. Delivery: `setup_client.py` already copies all of `client-kit/.claude/` into each client, so no wiring change is needed for the skill to reach members.
 
 - [ ] **Step 1: Write the skill file**
 
@@ -1058,7 +1067,7 @@ Expected: `['x']`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add CONTROL/skills/process-meeting/SKILL.md
+git add client-kit/.claude/skills/process-meeting/SKILL.md
 git commit -m "feat: /process-meeting skill (raw transcript -> shared contribution)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -1083,10 +1092,10 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
   - Add a row to the command-reference table:
     | Process a meeting into a shared contribution | run the `/process-meeting` skill in your assistant |
 
-- [ ] **Step 3: Verify no stale "next sub-project" claim about roll-up remains**
+- [ ] **Step 3: Verify no stale roll-up-deferral claim remains**
 
-Run: `grep -rn "next sub-project\|roll-up is the next\|sub-project 1 of 5" README.md docs/getting-started.md`
-Expected: no results referring to roll-up as unshipped.
+Run: `grep -rni "roll-up.*next sub-project\|is the next sub-project" README.md docs/getting-started.md`
+Expected: no results (the sentence deferring roll-up to a future sub-project is gone). Separately confirm the status line now credits sub-project 2 as done.
 
 - [ ] **Step 4: Commit**
 
