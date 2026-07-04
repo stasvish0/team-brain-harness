@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from lib.gitsync import run_git, push_paths
+
 def slugify(title):
     """Lowercase, keep word chars, collapse the rest to single hyphens."""
     s = re.sub(r"[^a-z0-9]+", "-", title.lower())
@@ -170,3 +172,74 @@ def find_meeting_dirs(repo, date):
         return []
     return sorted(p for p in base.iterdir()
                   if p.is_dir() and p.name.startswith(date + "-"))
+
+# --- roll-up ----------------------------------------------------------------
+
+def _canonical_path(meeting_dir):
+    """Deterministic canonical-note path: prefer the slug derived from the dir
+    name; if that file exists reuse it; else if some other top-level .md exists
+    (a stray) use the sorted-first; else the derived path."""
+    meeting_dir = Path(meeting_dir)
+    name = meeting_dir.name
+    slug = name[len("YYYY-MM-DD-"):] if len(name) > 11 and name[10] == "-" else ""
+    derived = meeting_dir / (f"{slug}.md" if slug else "meeting.md")
+    if derived.exists():
+        return derived
+    existing = sorted(meeting_dir.glob("*.md"))  # non-recursive: excludes _inbox/
+    return existing[0] if existing else derived
+
+def roll_up(repo, meeting_dir):
+    """Fold this meeting's inbox contributions into the canonical note and
+    delete the folded inbox files. Returns True when something changed (a
+    to-be-committed transaction), False when there is nothing new to fold."""
+    meeting_dir = Path(meeting_dir)
+    inbox = meeting_dir / "_inbox"
+    contrib_files = sorted(inbox.glob("*.md")) if inbox.is_dir() else []
+    # parse once, keep (file, payload) pairs aligned; drop unparseable files
+    pairs = [(f, parse_payload(f)) for f in contrib_files]
+    pairs = [(f, c) for f, c in pairs if c is not None]
+    if not pairs:
+        return False
+    canon_path = _canonical_path(meeting_dir)
+    existing = parse_payload(canon_path) if canon_path.exists() else None
+    known = set(e["content_hash"] for e in (existing or {}).get("merged_authors", []))
+    new = [c for _, c in pairs if content_hash(c) not in known]
+    if not new:
+        return False  # nothing new -> touch nothing, worktree stays clean
+    merged = merge(existing, new)
+    canon_path.write_text(render(merged))
+    # every parsed contribution is now reflected in canonical (folded or already
+    # known), so delete them all; unparseable files (excluded above) are left alone
+    for f, _ in pairs:
+        f.unlink()
+    try:
+        inbox.rmdir()  # drop the now-empty inbox dir; harmless if not empty
+    except OSError:
+        pass
+    return True
+
+def roll_up_all(repo, remote="origin", branch="main"):
+    """Session-start transaction driver: for each meeting inbox with new
+    contributions, roll up and push as an independent per-meeting transaction.
+    On a push conflict, reset hard to the remote tip (restoring the inbox for a
+    later retry) and continue. Returns [(meeting_name, status), ...]."""
+    repo = Path(repo)
+    base = repo / "meetings"
+    results = []
+    if not base.is_dir():
+        return results
+    for mdir in sorted(base.iterdir()):
+        inbox = mdir / "_inbox"
+        if not (mdir.is_dir() and inbox.is_dir() and any(inbox.glob("*.md"))):
+            continue
+        if not roll_up(repo, mdir):
+            continue
+        rel = f"meetings/{mdir.name}/"
+        try:
+            status = push_paths(repo, f"roll up {mdir.name}", [rel],
+                                remote=remote, branch=branch)
+            results.append((mdir.name, status))
+        except RuntimeError:
+            run_git(repo, "reset", "--hard", f"{remote}/{branch}")
+            results.append((mdir.name, "deferred-conflict"))
+    return results
