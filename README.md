@@ -24,10 +24,13 @@ while raw/private content never leaves.
 
 The walking-skeleton design (git as the sync substrate, an allowlist as the primary
 publish guard with gitignore as the backstop, and the pull/publish hook contract) is
-what `lib/gitsync.py`, `tools/`, and `client-kit/` implement. The intended home for
-the written design spec is
-`docs/superpowers/specs/2026-07-03-group-hive-brain-design.md` (not yet committed in
-this repo).
+what `lib/gitsync.py`, `tools/`, and `client-kit/` implement.
+
+- Full design spec: [docs/superpowers/specs/2026-07-03-group-hive-brain-design.md](docs/superpowers/specs/2026-07-03-group-hive-brain-design.md)
+- Implementation plan for this walking skeleton: [docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md](docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md)
+
+The spec covers the full group system (control plane, meeting roll-up, TTL/freshness,
+onboarding); this repo currently implements sub-project 1 (the vault + sync hooks).
 
 ## Development
 
