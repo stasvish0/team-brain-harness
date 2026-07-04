@@ -1,0 +1,12 @@
+# Shared pathspecs that may be published upstream. Everything else stays local.
+org/
+product/
+engineering/
+design/
+customers/
+market/
+knowledge/
+projects/
+decisions/
+meetings/
+CONTROL/
