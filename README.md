@@ -115,3 +115,7 @@ python3 -m venv .venv
 ```
 
 A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (12 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop and the privacy invariant.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
