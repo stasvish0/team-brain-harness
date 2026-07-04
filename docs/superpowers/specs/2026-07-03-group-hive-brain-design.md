@@ -157,7 +157,7 @@ Port `last_verified` frontmatter, per-type horizons, the SessionStart health hoo
 
 ### 4.10 Repository topology (open-source monorepo + live instance)
 ```
-ai-team-brain/                 # THE OPEN-SOURCE MONOREPO (the product)
+team-brain-harness/                 # THE OPEN-SOURCE MONOREPO (the product)
 ├─ README.md                 # getting started: clone -> stand it up
 ├─ docs/                     # installation walkthrough + how-to guides
 ├─ installer/                # bootstrap: SSH keygen+guide, clone, wire hooks, private tree, role
@@ -206,4 +206,4 @@ Runtime rule: clients only ever clone and sync the **live hive**. The monorepo i
 - **Scale of write contention:** rebase-retry is fine for a mid-size group; revisit if contention grows.
 
 ## 8. Relationship to existing artifacts
-This extends the single-user OS and reuses much of `em-os-starter` (folder taxonomy, templates, memory/TTL subsystem, meeting processing, `/todo`, `/memory-audit`). `em-os-starter` becomes the seed for `client-kit/` and `hive-template/` inside the new open-source monorepo (`ai-team-brain`). The group layer adds: the monorepo packaging and instantiation tooling, the two sync hooks, the control plane, the roll-up mechanism, the privacy allowlist, and the admin runbook.
+This extends the single-user OS and reuses much of `em-os-starter` (folder taxonomy, templates, memory/TTL subsystem, meeting processing, `/todo`, `/memory-audit`). `em-os-starter` becomes the seed for `client-kit/` and `hive-template/` inside the new open-source monorepo (`team-brain-harness`). The group layer adds: the monorepo packaging and instantiation tooling, the two sync hooks, the control plane, the roll-up mechanism, the privacy allowlist, and the admin runbook.

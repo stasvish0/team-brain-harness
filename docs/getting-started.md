@@ -1,131 +1,148 @@
 # Getting started
 
-This is a copy-pasteable walkthrough for standing up a group "team brain" and
-provisioning members against it.
+A step-by-step, copy-pasteable guide to standing up a team brain and joining it. Follow the part that matches you:
 
-## What this repo is (product vs. live instance)
+- **[Part A: Admin](#part-a-admin--create-the-team-brain-once)** creates the shared brain once.
+- **[Part B: Member](#part-b-member--join-the-team-brain)** joins it on their machine.
+- **[Part C: Daily use](#part-c-daily-use)** is what everyone does day to day.
 
-This repository is the **open-source product**, not anyone's data. It ships four things:
+> This repo is the open-source **product**, not anyone's data. You will create a separate **private live hive** from it and sync against that. See [Product vs. live instance](../README.md#product-vs-live-instance).
 
-- **installer / client-kit** (`client-kit/`) - the hooks, allowlist, and per-member
-  scaffolding that a member's clone gets.
-- **hive-template** (`hive-template/`) - the empty knowledge tree a group starts from.
-- **tools** (`tools/`) - `instantiate.py` (create a live hive) and `setup_client.py`
-  (provision a member).
-- **library + docs** (`lib/`, `docs/`) - the git-sync engine and this guide.
+---
 
-The product-vs-live-instance model:
+## Prerequisites
 
-- A real group **instantiates a PRIVATE live hive** from `hive-template`. That private
-  hive is a separate git repo (typically a private GitHub repo) and holds the group's
-  actual shared knowledge.
-- **Members sync against that private hive**, never against this public product repo.
-- This public repo only produces new hives and new member clones; it never receives
-  anyone's content.
-
-```
-this public repo  --instantiate-->  PRIVATE live hive (private GitHub repo)
-                                          ^          ^
-                                          |          |
-                                   member A     member B   (clones, sync here)
-```
-
-## 1. Create a live hive
-
-`instantiate` copies `hive-template`, vendors the CONTROL skills, and makes the first
-commit. It exposes an `instantiate(dest)` function and a tiny CLI.
-
-Using the CLI (the dest path is `argv[1]`):
+You need three things. Check them first:
 
 ```bash
-python3 tools/instantiate.py /path/to/acme-hive
+git --version        # any recent git
+python3 --version    # 3.11 or newer
+ssh -T git@github.com   # should greet you by username (SSH set up with GitHub)
 ```
 
-Equivalent, calling the function directly:
+If `ssh -T git@github.com` fails, add an SSH key to your GitHub account first: [GitHub's SSH guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh). This is the one manual step for non-technical members; an admin can walk you through it.
+
+Then get this harness on your machine:
 
 ```bash
-python3 -c "from tools.instantiate import instantiate; instantiate('/path/to/acme-hive')"
+git clone git@github.com:YOUR_ORG/team-brain-harness.git
+cd team-brain-harness
 ```
 
-Either one prints the created path and leaves a git repo with one commit
-(`chore: instantiate live hive from template`).
+---
 
-Now push it to a **new private GitHub repo** (create the empty repo first, then):
+## Part A: Admin, create the team brain (once)
+
+You will create a live hive from the template and push it to a **new private** GitHub repo. Members sync against that repo.
+
+**Step 1. Instantiate a live hive locally.**
 
 ```bash
-cd /path/to/acme-hive
-git remote add origin git@github.com:acme/acme-hive.git   # your PRIVATE repo
+python3 tools/instantiate.py ~/acme-hive
+```
+
+This copies the empty vault scaffolding, vendors the shared skills into `CONTROL/`, and makes the first commit. It prints the path and leaves a git repo with one commit.
+
+**Step 2. Create an empty PRIVATE repo on GitHub.** Either in the GitHub UI (New repository, Private, no README), or with the CLI:
+
+```bash
+gh repo create ACME/acme-hive --private
+```
+
+**Step 3. Push the hive to it.**
+
+```bash
+cd ~/acme-hive
+git remote add origin git@github.com:ACME/acme-hive.git
 git push -u origin main
 ```
 
-That remote URL is what members sync against below.
+**Step 4. Share the remote URL** (`git@github.com:ACME/acme-hive.git`) with your team. That is the only thing members need from you.
 
-## 2. Provision a member
+Done. The team brain exists. Everything members add flows into this repo.
 
-`setup_client` clones the live hive, vendors the hooks + `lib/`, and builds the
-gitignored `private/` tree. It exposes a `setup_client(remote_url, dest)` function and
-a CLI.
+---
 
-Using the CLI (`argv[1]` is the remote URL, `argv[2]` is the dest):
+## Part B: Member, join the team brain
 
-```bash
-python3 tools/setup_client.py git@github.com:acme/acme-hive.git /path/to/alice
-```
-
-Equivalent, calling the function directly:
+One command provisions your local client from the hive URL your admin gave you:
 
 ```bash
-python3 -c "from tools.setup_client import setup_client; setup_client('git@github.com:acme/acme-hive.git', '/path/to/alice')"
+python3 tools/setup_client.py git@github.com:ACME/acme-hive.git ~/acme-brain
 ```
 
-The member clone contains the shared tree (`engineering/`, `decisions/`, ...), the
-member's own gitignored `private/` tree, the two hooks under `.claude/hooks/`, a
-`publish_allowlist.txt`, and a vendored `lib/`.
+This clones the hive, vendors the sync hooks and the git-sync library, and builds your private tree. You now have:
 
-## 3. How the two hooks work
+```text
+~/acme-brain/                 # your clone of the shared team brain (syncs)
+├─ engineering/  product/  design/  customers/  market/  ...   # shared knowledge
+├─ CONTROL/                   # shared skills + manifest
+├─ .claude/
+│  ├─ hooks/                  # sync_pull.py + publish.py (run for you)
+│  └─ settings.local.json     # wires the SessionStart pull
+├─ publish_allowlist.txt      # which paths may be published
+└─ private/                   # LOCAL ONLY, never leaves your machine
+   ├─ personal-meetings/      #   raw transcripts live here
+   ├─ personal-context/  personal-decisions/  personal-docs/
+   ├─ personal-drafts/   personal-projects/   personal-reviews/
+   └─ TODO.md
+```
 
-Members never run raw git for sync. Two hooks handle it:
+Point your AI assistant (e.g. Claude Code) at `~/acme-brain` and you are ready.
 
-- **SessionStart pull** (`.claude/hooks/sync_pull.py`) - runs on session start and
-  fetches + rebases the member's clone onto the live hive so they open with the
-  latest shared knowledge. Wired in `client-kit/.claude/settings.local.json` and
-  invoked as `python3 .claude/hooks/sync_pull.py --repo <clone>`.
+---
 
-- **Explicit publish** (`.claude/hooks/publish.py`) - run when a member wants to push
-  shared changes upstream. It stages only allowlisted paths, commits, and pushes with
-  fetch->rebase->retry so a concurrent push is never clobbered:
+## Part C: Daily use
 
-  ```bash
-  python3 .claude/hooks/publish.py \
-    --repo /path/to/alice \
-    --allowlist /path/to/alice/publish_allowlist.txt \
-    --message "add adr-001"
-  ```
+**Pull happens automatically.** When your assistant starts a session in `~/acme-brain`, the SessionStart hook runs `git pull` so you open already caught up on the team's latest shared knowledge. To pull manually:
 
-  It prints `pushed` when something went up, or `nothing-to-publish` when there was
-  nothing staged after applying the allowlist.
+```bash
+python3 .claude/hooks/sync_pull.py --repo ~/acme-brain
+```
 
-## 4. The private tree and the golden rule
+**Publish when you have something to share.** Publishing is always explicit. It stages only allowlisted shared paths, commits, and pushes with fetch-rebase-retry so a teammate's concurrent push is never clobbered:
 
-Every member clone has a `private/` tree (`private/personal-context/`,
-`private/personal-meetings/`, `private/TODO.md`, ...). This is the member's own raw and
-personal content.
+```bash
+python3 .claude/hooks/publish.py \
+  --repo ~/acme-brain \
+  --allowlist ~/acme-brain/publish_allowlist.txt \
+  --message "standup notes 2026-07-04"
+```
 
-**Golden rule: only allowlisted paths publish, and raw/private content never leaves.**
+It prints `pushed` when something went up, or `nothing-to-publish` when nothing allowlisted had changed.
 
-Two layers enforce it:
+**The golden rule:** only allowlisted paths publish, and raw/private content never leaves. Keep raw transcripts and personal notes in `private/`; put anything meant for the team in the shared folders (`engineering/`, `product/`, `decisions/`, ...).
 
-- **The allowlist is the primary guard.** `publish` stages *only* the pathspecs listed
-  in `publish_allowlist.txt` (`org/`, `engineering/`, `decisions/`, `CONTROL/`, ...).
-  A file outside those paths is never staged, so it is never committed or pushed.
-- **gitignore is the backstop.** `/private/` is gitignored both by the live hive's
-  committed `.gitignore` and by each clone's local `.git/info/exclude`, so even a stray
-  `git add` cannot stage it.
+### What a standup looks like
 
-The result: a member can keep personal notes in `private/` forever and they will never
-reach the shared remote. This is exercised end to end by
-`tests/test_e2e_loop.py`, which writes a private note and a shared note, publishes, and
-asserts the private note never reaches the remote.
+```mermaid
+sequenceDiagram
+  participant You as You (local)
+  participant H as Team brain (git)
+  Note over You: Record raw standup notes into private/personal-meetings/ (stays local)
+  You->>You: process them into shareable notes (decisions, action items)
+  You->>You: write those into a shared folder, e.g. meetings/ or projects/
+  You->>H: publish.py  (allowlisted paths only, rebase+retry)
+  Note over H: Your teammate publishes too; both land, nothing overwritten
+  H->>You: next session start: sync_pull.py
+  Note over You: Your assistant now knows the whole standup, raw recording never left your machine
+```
+
+---
+
+## Command reference
+
+| Goal | Command |
+|------|---------|
+| Create a live hive | `python3 tools/instantiate.py <dest>` |
+| Provision a member client | `python3 tools/setup_client.py <hive-git-url> <dest>` |
+| Pull latest (manual) | `python3 .claude/hooks/sync_pull.py --repo <clone>` |
+| Publish shared changes | `python3 .claude/hooks/publish.py --repo <clone> --allowlist <clone>/publish_allowlist.txt --message "..."` |
+| Run the test suite | `./.venv/bin/python -m pytest -q` |
+
+The two tools also expose plain functions if you prefer: `from tools.instantiate import instantiate` and `from tools.setup_client import setup_client`.
+
+---
 
 ## Development
 
@@ -137,8 +154,13 @@ python3 -m venv .venv
 ./.venv/bin/python -m pytest -q
 ```
 
-Why the venv: on many modern systems the system Python is **PEP 668
-externally-managed**, so `pip install` into it is blocked (and polluting system Python
-is a bad idea anyway). A local `.venv` sidesteps that and keeps the toolchain
-reproducible. `pyproject.toml` sets `pythonpath = ["."]` so tests import `lib`,
-`tools`, etc. without any install step.
+Why the venv: on many modern systems the system Python is **PEP 668 externally-managed**, so `pip install` into it is blocked. A local `.venv` sidesteps that. `pyproject.toml` sets `pythonpath = ["."]` so tests import `lib`, `tools`, etc. with no install step. The suite exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop and the privacy invariant.
+
+---
+
+## Troubleshooting
+
+- **`ssh -T git@github.com` fails / push is denied.** Your SSH key is not registered with GitHub. Follow the SSH guide linked in Prerequisites, then retry.
+- **`pip install` refused with an "externally-managed-environment" error.** Use the `.venv` steps in Development; do not install into system Python.
+- **`publish.py` prints `nothing-to-publish`.** Nothing under the allowlisted paths changed. Make sure your shared content is in a folder listed in `publish_allowlist.txt` (not in `private/`).
+- **A publish raised a rebase-conflict error.** Two people edited the same shared file at once. That is intentionally routed to a human: pull, resolve the file, and publish again. Your repo is left clean (not mid-rebase).

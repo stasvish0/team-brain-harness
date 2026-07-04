@@ -4,13 +4,13 @@
 
 **Goal:** Stand up the open-source monorepo skeleton and prove the core loop: instantiate a live hive, set up a client clone, and let a person explicitly publish shared content upstream and pull others' changes down, with private content never leaving the machine and concurrent pushes never overwriting each other.
 
-**Architecture:** A single open-source monorepo (`ai-team-brain`) holds `hive-template/`, `client-kit/`, `lib/`, `tools/`, `tests/`, and `docs/`. A live hive is a separate Git repo instantiated from `hive-template/`. A client is a clone of a live hive with a gitignored `private/` tree and two Python hooks (`sync_pull.py`, `publish.py`) that wrap git. All git logic lives in `lib/gitsync.py` and is unit-tested against temporary bare remotes.
+**Architecture:** A single open-source monorepo (`team-brain-harness`) holds `hive-template/`, `client-kit/`, `lib/`, `tools/`, `tests/`, and `docs/`. A live hive is a separate Git repo instantiated from `hive-template/`. A client is a clone of a live hive with a gitignored `private/` tree and two Python hooks (`sync_pull.py`, `publish.py`) that wrap git. All git logic lives in `lib/gitsync.py` and is unit-tested against temporary bare remotes.
 
 **Tech Stack:** Python 3.11+, `git` CLI (via `subprocess`), `pytest`. Hooks are Python for portability and testability (consistent with the existing `memory-health.py` precedent). Shell is only used to invoke Python.
 
 **Scope note:** This is sub-project 1 of 5 from the design spec (`docs/superpowers/specs/2026-07-03-group-hive-brain-design.md`). It deliberately excludes the control plane, meeting roll-up, TTL port, and the full SSH/role installer. It includes a *minimal* client setup helper only so the loop is end-to-end testable.
 
-**Build location:** Create the monorepo at `~/ai-team-brain`. All paths below are relative to that root unless absolute.
+**Build location:** Create the monorepo at `~/team-brain-harness`. All paths below are relative to that root unless absolute.
 
 ---
 
@@ -36,13 +36,13 @@
 ## Task 1: Monorepo scaffolding
 
 **Files:**
-- Create: `~/ai-team-brain/.gitignore`, `~/ai-team-brain/pyproject.toml`, `~/ai-team-brain/lib/__init__.py`, `~/ai-team-brain/tests/__init__.py`
+- Create: `~/team-brain-harness/.gitignore`, `~/team-brain-harness/pyproject.toml`, `~/team-brain-harness/lib/__init__.py`, `~/team-brain-harness/tests/__init__.py`
 
 - [ ] **Step 1: Create the repo and directory skeleton**
 
 ```bash
-mkdir -p ~/ai-team-brain/{lib,tools,tests,client-kit/.claude/hooks,hive-template/CONTROL,docs}
-cd ~/ai-team-brain && git init && git branch -M main
+mkdir -p ~/team-brain-harness/{lib,tools,tests,client-kit/.claude/hooks,hive-template/CONTROL,docs}
+cd ~/team-brain-harness && git init && git branch -M main
 ```
 
 - [ ] **Step 2: Write `.gitignore` and `pyproject.toml`**
@@ -58,7 +58,7 @@ __pycache__/
 `pyproject.toml`:
 ```toml
 [project]
-name = "ai-team-brain"
+name = "team-brain-harness"
 version = "0.0.1"
 requires-python = ">=3.11"
 
@@ -73,13 +73,13 @@ Create empty `lib/__init__.py` and `tests/__init__.py`.
 
 - [ ] **Step 4: Verify pytest runs (no tests yet)**
 
-Run: `cd ~/ai-team-brain && python3 -m pytest -q`
+Run: `cd ~/team-brain-harness && python3 -m pytest -q`
 Expected: `no tests ran` (exit code 5), not an import/config error.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/ai-team-brain && git add -A && git commit -m "chore: monorepo scaffolding"
+cd ~/team-brain-harness && git add -A && git commit -m "chore: monorepo scaffolding"
 ```
 
 ---
@@ -178,7 +178,7 @@ git add lib/gitsync.py tests/conftest.py tests/test_run_git.py && git commit -m 
 ```python
 from pathlib import Path
 
-TEMPLATE = Path.home() / "ai-team-brain" / "hive-template"
+TEMPLATE = Path.home() / "team-brain-harness" / "hive-template"
 
 def test_functional_dirs_exist():
     for d in ["org", "product", "engineering", "design", "customers",
@@ -199,7 +199,7 @@ Expected: FAIL (dirs / file missing).
 - [ ] **Step 3: Create the template**
 
 ```bash
-cd ~/ai-team-brain/hive-template
+cd ~/team-brain-harness/hive-template
 mkdir -p org product engineering design customers market knowledge projects decisions meetings CONTROL
 for d in org product engineering design customers market knowledge projects decisions meetings; do touch "$d/.gitkeep"; done
 ```
@@ -820,7 +820,7 @@ def test_full_loop(tmp_path):
 
 - [ ] **Step 2: Run the full suite**
 
-Run: `cd ~/ai-team-brain && python3 -m pytest -q`
+Run: `cd ~/team-brain-harness && python3 -m pytest -q`
 Expected: ALL PASS, including the e2e loop.
 
 - [ ] **Step 3: Commit**
@@ -860,7 +860,7 @@ git add README.md docs/getting-started.md && git commit -m "docs: getting-starte
 
 ## Done criteria
 
-- `python3 -m pytest -q` passes at `~/ai-team-brain`.
+- `python3 -m pytest -q` passes at `~/team-brain-harness`.
 - A live hive can be instantiated, two clients provisioned, a shared note published by one and pulled by the other, and a private note provably never leaves the machine.
 - Concurrent publishes rebase-and-retry without overwriting.
 - Getting-started docs let a newcomer reproduce the loop.
