@@ -1,0 +1,3 @@
+# Private, per-client content: NEVER synced to the live hive.
+/private/
+.claude/skills-local/
