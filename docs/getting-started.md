@@ -113,6 +113,8 @@ It prints `pushed` when something went up, or `nothing-to-publish` when nothing 
 
 **The golden rule:** only allowlisted paths publish, and raw/private content never leaves. Keep raw transcripts and personal notes in `private/`; put anything meant for the team in the shared folders (`engineering/`, `product/`, `decisions/`, ...).
 
+**Process a meeting into a shared record.** After a meeting whose raw transcript you saved under `private/personal-meetings/`, run the `/process-meeting` skill in your assistant. It summarizes your transcript into a structured contribution (decisions, action items, notes), writes it to `meetings/<id>/_inbox/<you>.md`, and publishes it. The raw transcript never leaves your machine; only the summary is shared. You do not merge by hand: the next teammate's session-start hook automatically rolls up every attendee's contribution into one canonical note (`meetings/<id>/<slug>.md`), deletes the inbox, and pushes. Re-runs and late contributions fold into the same note, deterministically.
+
 ### What a standup looks like
 
 ```mermaid
@@ -138,6 +140,7 @@ sequenceDiagram
 | Provision a member client | `python3 tools/setup_client.py <hive-git-url> <dest>` |
 | Pull latest (manual) | `python3 .claude/hooks/sync_pull.py --repo <clone>` |
 | Publish shared changes | `python3 .claude/hooks/publish.py --repo <clone> --allowlist <clone>/publish_allowlist.txt --message "..."` |
+| Process a meeting into a shared contribution | run the `/process-meeting` skill in your assistant |
 | Run the test suite | `./.venv/bin/python -m pytest -q` |
 
 The two tools also expose plain functions if you prefer: `from tools.instantiate import instantiate` and `from tools.setup_client import setup_client`.
