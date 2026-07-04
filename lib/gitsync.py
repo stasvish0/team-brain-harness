@@ -46,7 +46,12 @@ def publish(repo, message, allow_paths, remote="origin", branch="main", max_retr
 
 def pull(repo, remote="origin", branch="main"):
     """Session-start pull. Rebase local (unpushed) work on top of remote.
-    Private/ is gitignored, so nothing local-only is touched."""
+    Precondition: the worktree is clean or has only gitignored (private/) changes.
+    On a rebase conflict (a same-file clash on shared content), abort and raise so
+    a human resolves it, leaving the repo NOT mid-rebase (mirrors publish)."""
     run_git(repo, "fetch", remote, branch)
-    run_git(repo, "rebase", f"{remote}/{branch}")
+    rebase = run_git(repo, "rebase", f"{remote}/{branch}", check=False)
+    if rebase.returncode != 0:
+        run_git(repo, "rebase", "--abort", check=False)
+        raise RuntimeError("pull: rebase conflict on a shared file; needs manual resolution")
     return "pulled"
