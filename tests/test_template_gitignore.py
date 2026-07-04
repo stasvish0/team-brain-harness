@@ -1,6 +1,6 @@
 from pathlib import Path
 
-TEMPLATE = Path.home() / "ai-team-brain" / "hive-template"
+TEMPLATE = Path(__file__).resolve().parents[1] / "hive-template"
 
 def test_functional_dirs_exist():
     for d in ["org", "product", "engineering", "design", "customers",
