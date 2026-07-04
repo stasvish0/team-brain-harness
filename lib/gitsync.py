@@ -17,10 +17,11 @@ def stage_allowlist(repo, allow_paths):
 
 def read_allowlist(path):
     lines = []
-    for raw in open(path):
-        line = raw.split("#", 1)[0].strip()
-        if line:
-            lines.append(line)
+    with open(path) as f:
+        for raw in f:
+            line = raw.split("#", 1)[0].strip()
+            if line:
+                lines.append(line)
     return lines
 
 def publish(repo, message, allow_paths, remote="origin", branch="main", max_retries=5):
