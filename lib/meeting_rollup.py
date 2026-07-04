@@ -156,8 +156,10 @@ def parse_payload(path):
     text = Path(path).read_text()
     if SENTINEL not in text:
         return None
-    after = text.split(SENTINEL, 1)[1]
-    m = re.search(r"```json\n(.*?)\n```", after, re.DOTALL)
+    # The machine block is always LAST in the file. rsplit + end-anchor avoids
+    # locking onto a decoy sentinel+fence that appears inside human body text.
+    after = text.rsplit(SENTINEL, 1)[1]
+    m = re.search(r"```json\n(.*?)\n```\s*$", after, re.DOTALL)
     if not m:
         return None
     return json.loads(m.group(1))

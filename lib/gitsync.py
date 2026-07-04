@@ -28,9 +28,7 @@ def push_paths(repo, message, paths, remote="origin", branch="main", max_retries
     """Stage the given pathspecs (a directory pathspec also captures deletions),
     commit if anything is staged, then push with fetch->rebase->retry so a
     concurrent push is caught up to, never clobbered. Raises on a real conflict."""
-    for p in paths:
-        # check=False so a missing/empty pathspec does not abort the whole push
-        run_git(repo, "add", "--", p, check=False)
+    stage_allowlist(repo, paths)  # single staging implementation (dir pathspec captures deletions)
     staged = run_git(repo, "diff", "--cached", "--name-only").stdout.strip()
     if not staged:
         return "nothing-to-publish"

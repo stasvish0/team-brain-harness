@@ -91,3 +91,31 @@ def test_roll_up_all_pushes_canonical_and_clears_inbox(bare_remote, tmp_path):
     c = _clone(bare_remote, tmp_path / "c")
     assert (c / "meetings" / "2026-07-04-standup" / "standup.md").exists()
     assert not (c / "meetings" / "2026-07-04-standup" / "_inbox").exists()
+
+
+def test_roll_up_all_defers_on_conflict_and_leaves_repo_clean(bare_remote, tmp_path):
+    # a publishes two inbox contributions to the remote tip
+    a = _clone(bare_remote, tmp_path / "a")
+    amdir = a / "meetings" / "2026-07-04-standup"
+    _write_contrib(amdir, "alice", _contrib_payload("alice", decisions=["Ship it"]))
+    _write_contrib(amdir, "bob", _contrib_payload("bob", notes=["Staging tight"]))
+    push_paths(a, "inbox", ["meetings/"])
+
+    # b clones at this tip (has the inbox) and does NOT advance
+    b = _clone(bare_remote, tmp_path / "b")
+
+    # meanwhile x lands a conflicting canonical note (foreign content) WITHOUT
+    # touching the inbox, pushing the remote past b
+    x = _clone(bare_remote, tmp_path / "x")
+    (x / "meetings" / "2026-07-04-standup" / "standup.md").write_text("foreign canonical\n")
+    push_paths(x, "foreign canonical", ["meetings/"])
+
+    # b rolls up from its stale tip: push is rejected, rebase conflicts on standup.md
+    results = roll_up_all(b)
+    assert ("2026-07-04-standup", "deferred-conflict") in results
+    # repo is clean, not left mid-rebase
+    assert not (b / ".git" / "rebase-merge").exists()
+    assert not (b / ".git" / "rebase-apply").exists()
+    # reset to the remote tip restored the inbox files for a later retry
+    assert (b / "meetings" / "2026-07-04-standup" / "_inbox" / "alice.md").exists()
+    assert (b / "meetings" / "2026-07-04-standup" / "_inbox" / "bob.md").exists()
