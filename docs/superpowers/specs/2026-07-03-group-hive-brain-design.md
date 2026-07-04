@@ -1,28 +1,28 @@
-# Group Hive Brain: extending the EM OS to a cross-functional group
+# Group Hive Brain: a shared team brain for a cross-functional group
 
 - **Date:** 2026-07-03
 - **Status:** Draft for review
-- **Author:** Stas Wishnevetsky (with Claude)
-- **Builds on:** the single-user Engineering Director OS and the `em-os-starter` kit (`~/em-os-starter`)
+- **Author:** team-brain-harness maintainers
+- **Builds on:** a single-user personal-knowledge OS pattern (a per-person AI assistant with skills, a memory/freshness subsystem, and a folder taxonomy)
 
 ---
 
 ## 1. Context and goals
 
-The single-user EM OS is a markdown-based operating system for one leader, run inside a local AI client (Claude Code), with skills, a memory/freshness subsystem, and a folder taxonomy. This spec extends that model to a **cross-functional product group**: a shared "hive brain" of context that many people (engineers, PMs, UX, support, sales) contribute to and read from, each through their own local AI assistant.
+The single-user pattern this builds on is a markdown-based personal operating system for one person, run inside a local AI client, with skills, a memory/freshness subsystem, and a folder taxonomy. This spec extends that model to a **cross-functional product group**: a shared "hive brain" of context that many people (engineers, PMs, UX, support, sales) contribute to and read from, each through their own local AI assistant.
 
 Goals:
 - A single shared vault of group context that every member's assistant reads and writes.
 - Each member runs a local assistant seeded from a starter kit; hooks sync context up and down automatically.
 - A central control plane so the admin can push new skills, directory-structure changes, and new MCPs to every client.
 - Strong, structural privacy: personal and sensitive material never lands centrally.
-- An admin (Stas) who can prune the vault and purge anything that leaks in.
+- An admin who can prune the vault and purge anything that leaks in.
 
-**Primary deliverable and delivery sequence.** The main artifact is the **open-source monorepo** itself: a complete, documented, reusable setup anyone could clone and stand up. Deployment to Stas's engineering group is **not** part of building the artifact; it is the *first use* of the finished artifact and its validation (dogfooding as customer zero). Sequence: (1) build the monorepo across the sub-projects, (2) then instantiate a private live hive for the group from that repo.
+**Primary deliverable and delivery sequence.** The main artifact is the **open-source monorepo** itself: a complete, documented, reusable setup anyone could clone and stand up. Deployment to a real group is **not** part of building the artifact; it is the *first use* of the finished artifact and its validation (dogfooding as the first deployment). Sequence: (1) build the monorepo across the sub-projects, (2) then instantiate a private live hive for the group from that repo.
 
-**Acceptance gate (dogfood):** the artifact is "done" only when Stas can stand up the group's live hive and onboard members using **only the repo's own getting-started and how-to docs**, with no undocumented steps. This forces the installer and docs to be genuinely complete rather than dependent on tribal knowledge.
+**Acceptance gate (dogfood):** the artifact is "done" only when a maintainer can stand up a group's live hive and onboard members using **only the repo's own getting-started and how-to docs**, with no undocumented steps. This forces the installer and docs to be genuinely complete rather than dependent on tribal knowledge.
 
-Design bias: keep it simple and grounded by this concrete first deployment, while staying general enough to be a clean open-source project (no company specifics baked into the repo).
+Design bias: keep it simple and grounded by a concrete first deployment, while staying general enough to be a clean open-source project (no company specifics baked into the repo).
 
 ## 2. Non-goals and constraints
 
@@ -42,7 +42,7 @@ Everything ships as a **single open-source monorepo** (installer, client kit, hi
 **Product vs. live instance (important):** the monorepo is the open-source *product* (source, tooling, docs, and an empty `hive-template/`). A real group *instantiates* a private **live hive** repo from `hive-template/`, with `CONTROL/` vendored in; members' clients sync against that private live hive, never the public monorepo. This keeps company content out of the open-source repo and lets a deployment pull tooling upgrades by re-vendoring from the monorepo. See 4.10 for the topology.
 
 ### 3.2 Auth: personal GitHub accounts + SSH keys
-Every member has their own GitHub account and an SSH key. No SSO, no broker, no token-provisioning service. Stas personally teaches non-technical members how to create an account and register their key. A bootstrap installer automates the machine side: it generates the SSH keypair, prints the public key and opens the GitHub SSH-keys page for the user to paste it (the only manual step, which Stas assists with), then configures git so users never run raw git commands.
+Every member has their own GitHub account and an SSH key. No SSO, no broker, no token-provisioning service. The admin personally teaches non-technical members how to create an account and register their key. A bootstrap installer automates the machine side: it generates the SSH keypair, prints the public key and opens the GitHub SSH-keys page for the user to paste it (the only manual step, which the admin assists with), then configures git so users never run raw git commands.
 
 ### 3.3 Privacy: private by default, explicit publish
 Nothing leaves a client unless it sits in a designated shared area (the repo working tree, minus gitignored paths). Personal content lives in a local, gitignored `private/` tree that the sync hooks never touch. Publishing is an explicit act that stages an allowlist of shared paths.
@@ -183,18 +183,18 @@ Runtime rule: clients only ever clone and sync the **live hive**. The monorepo i
 
 ## 5. Onboarding
 
-**Admin bootstrap (Stas, once):** create the GitHub org and repo, seed `CONTROL/` and the shared structure, define roles, set branch protection, invite members.
+**Admin bootstrap (once):** create the GitHub org and repo, seed `CONTROL/` and the shared structure, define roles, set branch protection, invite members.
 
 **Member onboarding (each person):**
-1. Create a GitHub account (Stas teaches non-technical members).
-2. Run the installer: it installs the AI client, generates the SSH keypair and guides the user through pasting the public key into the GitHub UI (Stas assists non-technical members here), then clones the repo, wires the hooks, builds the `private/` tree, and records the person's role. The user's only manual responsibility is registering the printed public key.
+1. Create a GitHub account (the admin helps non-technical members).
+2. Run the installer: it installs the AI client, generates the SSH keypair and guides the user through pasting the public key into the GitHub UI (the admin assists non-technical members here), then clones the repo, wires the hooks, builds the `private/` tree, and records the person's role. The user's only manual responsibility is registering the printed public key.
 3. A first-run interview seeds `personal-context` (role, focus, what they work on), analogous to the single-user `/onboarding` skill.
 
 ## 6. Rollout plan
 1. Admin bootstraps the vault + control plane.
 2. Pilot with engineering (most git-comfortable) to shake out the hooks and roll-up.
 3. Add PM and UX.
-4. Add support and sales, with Stas hand-holding GitHub setup.
+4. Add support and sales, with the admin hand-holding GitHub setup.
 5. Iterate skills and structure centrally via the control plane as needs emerge.
 
 ## 7. Open questions and risks
@@ -206,4 +206,4 @@ Runtime rule: clients only ever clone and sync the **live hive**. The monorepo i
 - **Scale of write contention:** rebase-retry is fine for a mid-size group; revisit if contention grows.
 
 ## 8. Relationship to existing artifacts
-This extends the single-user OS and reuses much of `em-os-starter` (folder taxonomy, templates, memory/TTL subsystem, meeting processing, `/todo`, `/memory-audit`). `em-os-starter` becomes the seed for `client-kit/` and `hive-template/` inside the new open-source monorepo (`team-brain-harness`). The group layer adds: the monorepo packaging and instantiation tooling, the two sync hooks, the control plane, the roll-up mechanism, the privacy allowlist, and the admin runbook.
+This builds on a single-user personal-knowledge OS pattern (folder taxonomy, templates, a memory/TTL subsystem, meeting processing, and simple per-person skills such as `/todo` and `/memory-audit`), which seeds `client-kit/` and `hive-template/` inside the open-source monorepo (`team-brain-harness`). The group layer adds: the monorepo packaging and instantiation tooling, the two sync hooks, the control plane, the roll-up mechanism, the privacy allowlist, and the admin runbook.
