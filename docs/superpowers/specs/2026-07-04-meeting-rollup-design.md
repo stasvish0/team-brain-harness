@@ -62,7 +62,7 @@ The privacy line is exactly the `/process-meeting` skill: raw material in, a str
 The harness owns the deterministic, unit-tested plumbing: meeting-id helpers, the merge, the render, and the roll-up driver. A thin `/process-meeting` skill owns the non-deterministic part (summarizing a raw transcript into structured fields). The harness never parses a raw transcript.
 
 ### 4.2 Meeting-id agreement: discover-or-create by date + slug
-For contributions to merge they must land in the same `meetings/<id>/`. The id is `YYYY-MM-DD-<slug>`. Before writing, the skill lists existing meeting directories for the date (`find_meeting_dirs`) and reuses a matching one, reconciling title variants ("standup" vs "daily standup") with assistant judgment; it creates a new id only when nothing matches. This is generic (no calendar or transcript-tool dependency) and converges as members sync. Accepted tradeoff: if two members create different ids for the same meeting before either has synced, two meeting directories result and are reconciled by a human later.
+For contributions to merge they must land in the same `meetings/<id>/`. The id is `YYYY-MM-DD-<slug>`. Because a session may be hours old, the skill first refreshes the tree (`git fetch` + rebase, or a pull) so it discovers meeting dirs other members have already published, then lists existing meeting directories for the date (`find_meeting_dirs`) and reuses a matching one, reconciling title variants ("standup" vs "daily standup") with assistant judgment; it creates a new id only when nothing matches. This is generic (no calendar or transcript-tool dependency) and converges as members sync. Accepted tradeoff: if two members create different ids for the same meeting before either has synced (even after the pre-write refresh, if they act within the same unsynced window), two meeting directories result and are reconciled by a human later. A future helper could detect near-duplicate meeting dirs and propose a merge.
 
 ### 4.3 Inbox contribution: structured payload
 An inbox contribution is a small file whose YAML front-matter is a structured payload (`decisions`, `action_items` as `{owner, text}`, `notes`, plus `meeting_id`, `title`, `date`, `author`). Structured input makes the merge trivial and bulletproof rather than requiring Markdown scraping. Inbox files are ephemeral, so they are optimized for machine-merging, not for reading.
@@ -70,8 +70,12 @@ An inbox contribution is a small file whose YAML front-matter is a structured pa
 ### 4.4 Canonical note: YAML front-matter is the source of truth
 The canonical note is one Markdown file. Its YAML front-matter holds the merged structured payload plus a `merged_authors` ledger; its body is the rendered human-readable sections. Re-merge reads the front-matter (not the prose), so it stays deterministic. This matches the front-matter convention used elsewhere in the system.
 
+The `merged_authors` ledger is **load-bearing for idempotency, not decorative**. Each entry is `{author, content_hash}`, where `content_hash` is defined in 5.2. On roll-up, a contribution whose `content_hash` is already in the ledger has already been folded: its items are not re-added; the inbox file is simply cleaned up. Only contributions with a hash absent from the ledger fold in. If no contribution carries a new hash, roll-up is a no-op (no rewrite, no commit). This is what makes re-running safe even when a prior roll-up's push failed and left the inbox in place.
+
+**Merge semantics are additive, not retracting.** A late contribution from a *new* author folds in cleanly. A same-author *re-run* with changed wording produces a new `content_hash` and folds its new distinct items in (deduped by normalized text against what is already there); it does **not** retract items that author shared earlier. Retract/supersede is deliberately out of scope (YAGNI); the realistic case this sub-project serves is different attendees converging, not authors editing their own past contributions.
+
 ### 4.5 Roll-up: opportunistic, auto-push, best-effort, self-healing
-On session start, after pull and control-plane, the hook scans for non-empty `_inbox/` directories and rolls each up: merge into the canonical note, delete the folded inbox files, then push with the same fetch-rebase-retry engine as publish. On an unresolvable conflict or exhausted retries it aborts cleanly (repo left clean), warns the user, and leaves the inbox intact so the next client retries. The session always continues. Roll-up only ever rearranges already-shared inbox data, so a session-start push never carries anything private.
+On session start, **after** pull and control-plane, the hook scans for meeting inboxes with contribution files and rolls each up as an independent per-meeting transaction: merge new-hash contributions into the canonical note, delete the folded inbox files, commit only that meeting dir, then push with the same fetch-rebase-retry engine as publish. Meetings are processed one at a time; the worktree is clean (at the remote tip) between meetings, which is the precondition the pull/push engine requires. On an unresolvable conflict or exhausted retries for a meeting, the driver runs `git reset --hard <remote-tip>` for that transaction. That single action both discards the local roll-up commit and restores the deleted inbox files (or, if another client already landed the same merge upstream, leaves the already-merged state), so the repo is genuinely clean and the work either self-heals on the next session or is discovered already done. A warning is surfaced to the user; the session always continues, and a failure on one meeting does not block the others. Roll-up only ever stages paths under `meetings/<id>/`, and `private/` is gitignored, so a session-start push can never carry anything private.
 
 ## 5. Architecture
 
@@ -81,16 +85,20 @@ Pure, testable functions plus one repo-touching driver:
 - `find_meeting_dirs(repo, date) -> list[Path]` — existing meeting dirs for a date (input to discover-or-create).
 - `normalize(text) -> str` — lowercase, collapse whitespace, strip trailing punctuation; used for dedupe keys.
 - `parse_contribution(path) -> Contribution` / `parse_canonical(path) -> Canonical | None` — load structured payloads from front-matter.
-- `merge(existing: Canonical | None, contributions: list[Contribution]) -> Canonical` — the deterministic core (rules below).
-- `render(canonical: Canonical) -> str` — front-matter + rendered Markdown body.
-- `roll_up(repo, meeting_dir) -> bool` — read canonical + all inbox files, merge, write canonical, delete folded inbox files; returns whether anything changed.
+- `content_hash(contribution) -> str` — stable hash over the canonicalized payload (definition in 5.2).
+- `merge(existing: Canonical | None, contributions: list[Contribution]) -> Canonical` — the deterministic core (rules below); folds only contributions whose hash is absent from the existing ledger.
+- `render(canonical: Canonical) -> str` — front-matter + rendered Markdown body, with the total ordering from 5.2.
+- `roll_up(repo, meeting_dir) -> bool` — read canonical + all `_inbox/*.md`, merge new-hash contributions, write canonical, delete the folded inbox files; returns whether anything changed (False when every contribution was already in the ledger, so the caller skips the commit).
 
 ### 5.2 Merge rules (deterministic, idempotent)
+- **new-hash filter:** compute `content_hash` for each inbox contribution; skip (but clean up) any whose hash is already in `merged_authors`. Fold only the rest.
 - **decisions:** union, dedupe by `normalize(text)`; union the `by` attribution list.
 - **action_items:** dedupe by `(normalize(owner), normalize(text))`; union `by`.
 - **notes:** union, dedupe by `normalize(text)`.
-- **ledger:** record each folded contribution as `{author, content_hash}` in `merged_authors`.
-- **idempotency:** merge output is a pure function of `(existing canonical, contributions)`. Re-running on an empty inbox is a no-op (no commit). A late `<author>.md` whose hash is absent from the ledger folds into the same note. Two clients that see identical inputs produce byte-identical notes.
+- **ledger:** append each folded contribution as `{author, content_hash}` to `merged_authors`.
+- **`content_hash` definition:** `sha256` (hex, first 12 chars in examples) over a **canonicalized serialization of the payload fields only** (`decisions`, `action_items`, `notes`): each list normalized (`normalize` applied to text and owner) and sorted by its dedupe key, serialized with sorted keys and single-space-collapsed whitespace, excluding volatile metadata (`title`, `date`, `author`). This makes the hash stable across YAML serializers and independent of key ordering, so two authors who summarized identically hash identically.
+- **deterministic output ordering (required for byte-identity):** `render` and the front-matter both impose a total order on every list: `decisions` and `notes` sorted by `normalize(text)`; `action_items` grouped by owner then sorted by `normalize(text)`; `by` lists and `merged_authors` sorted by author-id. Union order must never depend on contribution processing order.
+- **idempotency:** merge output is a pure function of `(existing canonical, contributions)`. Re-running with no new-hash contributions is a no-op (no commit). A late contribution (new author, or a same-author re-run with changed wording) carries a new hash and folds into the same note. Two clients that see identical inputs produce byte-identical notes.
 
 ### 5.3 Data formats
 Inbox contribution `meetings/<id>/_inbox/<author>.md`:
@@ -137,21 +145,23 @@ notes:
 ```
 
 ### 5.4 Shared push helper in `lib/gitsync.py`
-Factor the fetch-rebase-retry push loop out of `publish` into a helper that stages a given set of paths **including deletions** (roll-up both writes the canonical note and deletes inbox files). Both `publish` and roll-up call it; the conflict behavior (abort clean, raise) is unchanged.
+Factor the fetch-rebase-retry push loop out of `publish` into a helper that stages a given set of paths **including deletions** (roll-up both writes the canonical note and deletes inbox files). The staged pathset for a roll-up is constructed **only** from paths under `meetings/<id>/`, so it can never include a `private/` path; combined with the gitignore on `private/`, that makes the "never carries anything private" invariant explicit rather than incidental. Both `publish` and roll-up call the helper. Its own conflict behavior (rebase abort, raise) is unchanged; the roll-up driver (5.6) wraps a raised failure in the reset-to-remote-tip cleanup from 4.5 so the worktree is left clean for the next per-meeting transaction and the next `pull`.
 
 ### 5.5 The `/process-meeting` skill
 Vendored via `CONTROL/skills/process-meeting/` into clients' `.claude/skills/`. Steps:
 1. Read a raw transcript from `private/personal-meetings/` (raw never leaves).
 2. Summarize into `decisions` / `action_items` / `notes`.
-3. Discover-or-create the meeting id (4.2), using `find_meeting_dirs` + `slugify`.
-4. Write `meetings/<id>/_inbox/<author>.md` (author from git `user.email` or the personal-context profile).
-5. Publish (the allowlist now includes `meetings/`).
+3. Refresh the tree (fetch + rebase / pull), then discover-or-create the meeting id (4.2), using `find_meeting_dirs` + `slugify`.
+4. Write `meetings/<id>/_inbox/<author-id>.md`.
+5. Publish (`meetings/` is already allowlisted).
+
+**Author-id (single canonical source, used for the inbox filename, `by`, and `merged_authors`):** a stable handle from the member's `personal-context` profile if present; otherwise the slugified local-part of git `user.email` (e.g. `alice@x.com` -> `alice`), via the same `slugify` rules. Exactly one source is chosen per member and used consistently everywhere, so a member never appears under two identities and their inbox filename is stable across re-runs.
 
 ### 5.6 Hook wiring
-`client-kit/.claude/hooks/sync_pull.py` gains a step after pull + control-plane: for each non-empty `meetings/*/_inbox/`, call `roll_up`, stage the meeting dir (canonical write + inbox deletions), and push via the shared helper, with the best-effort failure behavior in 4.5.
+`client-kit/.claude/hooks/sync_pull.py` gains a step after pull + control-plane: enumerate meeting inboxes by scanning `meetings/*/_inbox/*.md` specifically (stray non-`.md` files such as a macOS `.DS_Store` are ignored, so they never trigger a spurious roll-up). For each meeting that has at least one contribution file, run the per-meeting transaction from 4.5: `roll_up` (fold new-hash contributions, write canonical, delete folded inbox files) -> stage the meeting dir (writes + deletions) -> push via the shared helper. On failure, `git reset --hard <remote-tip>` for that transaction and continue to the next meeting. A meeting with only already-folded (ledger-known) contributions is a no-op: clean up the inbox files, no commit.
 
 ### 5.7 Allowlist
-`client-kit/publish_allowlist.txt` adds `meetings/` so contributions and roll-ups may publish.
+`meetings/` is already present in `client-kit/publish_allowlist.txt`, so no allowlist change is required; contributions and roll-ups publish under it as-is. (Called out only to confirm the path is covered.)
 
 ## 6. Testing
 
@@ -162,9 +172,11 @@ Vendored via `CONTROL/skills/process-meeting/` into clients' `.claude/skills/`. 
 
 ## 7. Open questions and risks
 
-- **Concurrent roll-up churn.** Two clients rolling up at once may both write the canonical note; fetch-rebase-retry lets one land and the other rebases. Because the merge is deterministic, they converge; worst case is a redundant commit or a retry. Accepted for the no-CI model.
-- **Split meeting ids.** Pre-sync id divergence (4.2) needs human reconciliation. A future helper could detect near-duplicate meeting dirs and propose a merge.
+- **Concurrent roll-up.** Two clients that pull the same state may both merge and commit an identical canonical note plus identical inbox deletions. One push lands. The other's push is rejected and it rebases; since the changes are byte-identical to what already landed, the rebase either drops the replayed commit as empty (a clean no-op) or the shared engine raises, in which case the driver resets to the remote tip (4.5) and finds the work already done. There is no "both land twice" outcome and nothing is lost. The only cost is an occasional wasted merge+reset. Accepted for the no-CI model.
+- **Split meeting ids.** The pre-write refresh in 4.2 closes the common stale-clone case, but two members acting inside the same unsynced window can still create divergent ids, which needs human reconciliation. A future helper could detect near-duplicate meeting dirs and propose a merge.
+- **Same-author re-runs accumulate variants.** Because merge is additive (4.4), an author who re-processes a meeting with reworded items adds new distinct items rather than replacing their earlier ones. Deduping only catches exact (normalized) matches. This is an accepted simplification; retract/supersede is out of scope.
 - **Attribution granularity.** The `by` list records who contributed each item, not who originally said it in the meeting; that is a deliberate simplification.
+- **User-visible failure surface.** On a roll-up abort (4.5) the user sees a one-line warning naming the meeting that could not be rolled up; the detailed retry is silent and automatic on the next session. The exact wording is a plan-level detail.
 
 ## 8. Relationship to existing artifacts
 
