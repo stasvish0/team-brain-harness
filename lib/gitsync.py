@@ -42,3 +42,10 @@ def publish(repo, message, allow_paths, remote="origin", branch="main", max_retr
             run_git(repo, "rebase", "--abort", check=False)
             raise RuntimeError("publish: rebase conflict on a shared file; needs manual resolution")
     raise RuntimeError("publish: push failed after retries")
+
+def pull(repo, remote="origin", branch="main"):
+    """Session-start pull. Rebase local (unpushed) work on top of remote.
+    Private/ is gitignored, so nothing local-only is touched."""
+    run_git(repo, "fetch", remote, branch)
+    run_git(repo, "rebase", f"{remote}/{branch}")
+    return "pulled"
