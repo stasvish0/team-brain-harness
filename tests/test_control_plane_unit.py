@@ -12,6 +12,7 @@ from lib.control_plane import (
     apply_migration,
     pending_migrations,
     evaluate_gate,
+    sync_skills,
 )
 
 
@@ -136,3 +137,32 @@ def test_gate_blocks_on_pending_migration_min_version():
 def test_gate_clear_when_client_meets_migration_min():
     pend = [{"min_client_version": "0.2.0"}, {"min_client_version": None}]
     assert evaluate_gate(_man("0.0.1"), "0.2.0", pend) == []
+
+
+def _skill(root, name, body):
+    d = root / "CONTROL" / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(body)
+
+
+def test_sync_skills_adds_updates_deletes(tmp_path):
+    _skill(tmp_path, "alpha", "A1")
+    _skill(tmp_path, "beta", "B1")
+    r1 = sync_skills(tmp_path)
+    assert (tmp_path / ".claude" / "skills" / "alpha" / "SKILL.md").read_text() == "A1"
+    assert r1["added"] == 2
+    _skill(tmp_path, "alpha", "A2")
+    import shutil as _sh
+    _sh.rmtree(tmp_path / "CONTROL" / "skills" / "beta")
+    r2 = sync_skills(tmp_path)
+    assert (tmp_path / ".claude" / "skills" / "alpha" / "SKILL.md").read_text() == "A2"
+    assert not (tmp_path / ".claude" / "skills" / "beta").exists()
+    assert r2["updated"] == 1 and r2["deleted"] == 1
+
+
+def test_sync_skills_leaves_skills_local_untouched(tmp_path):
+    _skill(tmp_path, "alpha", "A1")
+    local = tmp_path / ".claude" / "skills-local" / "mine"
+    local.mkdir(parents=True); (local / "SKILL.md").write_text("MINE")
+    sync_skills(tmp_path)
+    assert (local / "SKILL.md").read_text() == "MINE"

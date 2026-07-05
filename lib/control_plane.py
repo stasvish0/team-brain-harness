@@ -127,3 +127,36 @@ def evaluate_gate(manifest, client_version, pending_migration_data):
         if mmin and cv < version_tuple(mmin):
             reasons.append(f"a pending migration requires client >= {mmin}")
     return reasons
+
+
+def sync_skills(repo):
+    repo = Path(repo)
+    src = repo / "CONTROL" / "skills"
+    dst = repo / ".claude" / "skills"
+    src.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(parents=True, exist_ok=True)
+    src_files = {p.relative_to(src) for p in src.rglob("*") if p.is_file()}
+    dst_files = {p.relative_to(dst) for p in dst.rglob("*") if p.is_file()}
+    added = updated = deleted = 0
+    for rel in sorted(src_files):
+        s, d = src / rel, dst / rel
+        if not d.exists():
+            added += 1
+        elif s.read_bytes() != d.read_bytes():
+            updated += 1
+        else:
+            continue
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(s, d)
+    for rel in sorted(dst_files - src_files):
+        f = dst / rel
+        f.unlink()
+        deleted += 1
+        for parent in f.parents:
+            if parent == dst:
+                break
+            if parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+            else:
+                break
+    return {"added": added, "updated": updated, "deleted": deleted}
