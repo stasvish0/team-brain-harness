@@ -113,3 +113,17 @@ def pending_migrations(repo, applied):
         if mid > applied.get("structure_version", 0):
             out.append({"id": mid, "path": p, "data": json.loads(p.read_text())})
     return sorted(out, key=lambda m: m["id"])
+
+
+def evaluate_gate(manifest, client_version, pending_migration_data):
+    """Return a list of gate reasons (empty = clear)."""
+    reasons = []
+    cv = version_tuple(client_version)
+    minv = manifest.get("min_client_version") or "0.0.0"
+    if cv < version_tuple(minv):
+        reasons.append(f"client {client_version} is older than required {minv}")
+    for m in pending_migration_data:
+        mmin = m.get("min_client_version")
+        if mmin and cv < version_tuple(mmin):
+            reasons.append(f"a pending migration requires client >= {mmin}")
+    return reasons

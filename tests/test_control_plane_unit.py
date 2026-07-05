@@ -11,6 +11,7 @@ from lib.control_plane import (
     DEFAULT_APPLIED,
     apply_migration,
     pending_migrations,
+    evaluate_gate,
 )
 
 
@@ -113,3 +114,25 @@ def test_pending_migrations_skips_misnamed(tmp_path):
     (md / "notes.json").write_text('{"ops": []}')  # non-numeric prefix, skipped
     pend = pending_migrations(tmp_path, {"structure_version": 0})
     assert [p["id"] for p in pend] == [1]
+
+
+def _man(minv="0.0.1"):
+    return {"min_client_version": minv}
+
+
+def test_gate_clear_when_client_current():
+    assert evaluate_gate(_man("0.0.1"), "0.0.1", []) == []
+
+
+def test_gate_blocks_when_client_older_than_manifest():
+    assert evaluate_gate(_man("0.1.0"), "0.0.1", []) != []
+
+
+def test_gate_blocks_on_pending_migration_min_version():
+    pend = [{"min_client_version": "0.2.0"}]
+    assert evaluate_gate(_man("0.0.1"), "0.0.1", pend) != []
+
+
+def test_gate_clear_when_client_meets_migration_min():
+    pend = [{"min_client_version": "0.2.0"}, {"min_client_version": None}]
+    assert evaluate_gate(_man("0.0.1"), "0.2.0", pend) == []
