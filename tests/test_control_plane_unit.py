@@ -1,0 +1,185 @@
+import json
+
+import pytest
+
+from lib.version import CLIENT_VERSION
+from lib.control_plane import (
+    version_tuple,
+    read_manifest,
+    read_applied,
+    write_applied,
+    DEFAULT_APPLIED,
+    apply_migration,
+    pending_migrations,
+    evaluate_gate,
+    sync_skills,
+    reload_policy,
+    mcp_announcements,
+)
+
+
+def test_client_version_is_a_dotted_string():
+    assert isinstance(CLIENT_VERSION, str)
+    assert version_tuple(CLIENT_VERSION)
+
+
+def test_version_tuple_orders_correctly():
+    assert version_tuple("0.0.1") < version_tuple("0.1.0")
+    assert version_tuple("1.2.3") == version_tuple("1.2.3")
+    assert version_tuple("0.10.0") > version_tuple("0.9.0")
+
+
+def test_read_applied_defaults_when_missing(tmp_path):
+    assert read_applied(tmp_path) == DEFAULT_APPLIED
+
+
+def test_write_then_read_applied_roundtrips(tmp_path):
+    applied = {"skills_version": 2, "structure_version": 3,
+               "policy_version": 1, "announced_mcps": ["granola"]}
+    write_applied(tmp_path, applied)
+    assert read_applied(tmp_path) == applied
+
+
+def test_read_manifest_reads_control_manifest(tmp_path):
+    (tmp_path / "CONTROL").mkdir()
+    (tmp_path / "CONTROL" / "manifest.json").write_text(
+        json.dumps({"skills_version": 1, "structure_version": 0,
+                    "min_client_version": "0.0.1", "required_mcps": [],
+                    "policy_version": 1}))
+    m = read_manifest(tmp_path)
+    assert m["skills_version"] == 1 and m["min_client_version"] == "0.0.1"
+
+
+def test_write_applied_is_atomic_on_crash(tmp_path, monkeypatch):
+    good = {"skills_version": 1, "structure_version": 1,
+            "policy_version": 1, "announced_mcps": []}
+    write_applied(tmp_path, good)
+    import lib.control_plane as cp
+    monkeypatch.setattr(cp.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    try:
+        write_applied(tmp_path, {"skills_version": 99})
+    except OSError:
+        pass
+    assert read_applied(tmp_path) == good
+
+
+def test_make_dir_and_keep_file_idempotent(tmp_path):
+    mig = {"ops": [{"op": "make_dir", "path": "legal"},
+                   {"op": "keep_file", "path": "legal/.gitkeep"}]}
+    touched = apply_migration(tmp_path, mig)
+    assert (tmp_path / "legal" / ".gitkeep").exists()
+    assert "legal/.gitkeep" in touched
+    assert apply_migration(tmp_path, mig) == set()
+
+
+def test_move_quadrants(tmp_path):
+    (tmp_path / "a").mkdir(); (tmp_path / "a" / "f.md").write_text("x\n")
+    mig = {"ops": [{"op": "move", "from": "a/f.md", "to": "b/f.md"}]}
+    touched = apply_migration(tmp_path, mig)
+    assert not (tmp_path / "a" / "f.md").exists()
+    assert (tmp_path / "b" / "f.md").exists()
+    assert touched == {"a/f.md", "b/f.md"}
+    assert apply_migration(tmp_path, mig) == set()
+
+
+def test_move_collision_raises(tmp_path):
+    (tmp_path / "a").mkdir(); (tmp_path / "a" / "f").write_text("1")
+    (tmp_path / "b").mkdir(); (tmp_path / "b" / "f").write_text("2")
+    with pytest.raises(ValueError):
+        apply_migration(tmp_path, {"ops": [{"op": "move", "from": "a/f", "to": "b/f"}]})
+
+
+def test_delete_idempotent(tmp_path):
+    (tmp_path / "d").mkdir(); (tmp_path / "d" / "x").write_text("x")
+    assert apply_migration(tmp_path, {"ops": [{"op": "delete", "path": "d/x"}]}) == {"d/x"}
+    assert apply_migration(tmp_path, {"ops": [{"op": "delete", "path": "d/x"}]}) == set()
+
+
+@pytest.mark.parametrize("bad", ["../escape", "/abs/path", "private/x", ".claude/x", ".git/x"])
+def test_path_containment_rejected(tmp_path, bad):
+    with pytest.raises(ValueError):
+        apply_migration(tmp_path, {"ops": [{"op": "make_dir", "path": bad}]})
+
+
+def test_pending_migrations_filters_and_sorts(tmp_path):
+    md = tmp_path / "CONTROL" / "migrations"; md.mkdir(parents=True)
+    (md / "0001-a.json").write_text('{"ops": []}')
+    (md / "0002-b.json").write_text('{"ops": []}')
+    (md / "0003-c.json").write_text('{"ops": []}')
+    pend = pending_migrations(tmp_path, {"structure_version": 1})
+    assert [p["id"] for p in pend] == [2, 3]
+
+
+def test_pending_migrations_skips_misnamed(tmp_path):
+    md = tmp_path / "CONTROL" / "migrations"; md.mkdir(parents=True)
+    (md / "0001-a.json").write_text('{"ops": []}')
+    (md / "notes.json").write_text('{"ops": []}')  # non-numeric prefix, skipped
+    pend = pending_migrations(tmp_path, {"structure_version": 0})
+    assert [p["id"] for p in pend] == [1]
+
+
+def _man(minv="0.0.1"):
+    return {"min_client_version": minv}
+
+
+def test_gate_clear_when_client_current():
+    assert evaluate_gate(_man("0.0.1"), "0.0.1", []) == []
+
+
+def test_gate_blocks_when_client_older_than_manifest():
+    assert evaluate_gate(_man("0.1.0"), "0.0.1", []) != []
+
+
+def test_gate_blocks_on_pending_migration_min_version():
+    pend = [{"min_client_version": "0.2.0"}]
+    assert evaluate_gate(_man("0.0.1"), "0.0.1", pend) != []
+
+
+def test_gate_clear_when_client_meets_migration_min():
+    pend = [{"min_client_version": "0.2.0"}, {"min_client_version": None}]
+    assert evaluate_gate(_man("0.0.1"), "0.2.0", pend) == []
+
+
+def _skill(root, name, body):
+    d = root / "CONTROL" / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(body)
+
+
+def test_sync_skills_adds_updates_deletes(tmp_path):
+    _skill(tmp_path, "alpha", "A1")
+    _skill(tmp_path, "beta", "B1")
+    r1 = sync_skills(tmp_path)
+    assert (tmp_path / ".claude" / "skills" / "alpha" / "SKILL.md").read_text() == "A1"
+    assert r1["added"] == 2
+    _skill(tmp_path, "alpha", "A2")
+    import shutil as _sh
+    _sh.rmtree(tmp_path / "CONTROL" / "skills" / "beta")
+    r2 = sync_skills(tmp_path)
+    assert (tmp_path / ".claude" / "skills" / "alpha" / "SKILL.md").read_text() == "A2"
+    assert not (tmp_path / ".claude" / "skills" / "beta").exists()
+    assert r2["updated"] == 1 and r2["deleted"] == 1
+
+
+def test_sync_skills_leaves_skills_local_untouched(tmp_path):
+    _skill(tmp_path, "alpha", "A1")
+    local = tmp_path / ".claude" / "skills-local" / "mine"
+    local.mkdir(parents=True); (local / "SKILL.md").write_text("MINE")
+    sync_skills(tmp_path)
+    assert (local / "SKILL.md").read_text() == "MINE"
+
+
+def test_reload_policy_reads_or_empty(tmp_path):
+    assert reload_policy(tmp_path) == ""
+    (tmp_path / "CONTROL").mkdir(exist_ok=True)
+    (tmp_path / "CONTROL" / "policy.md").write_text("be excellent\n")
+    assert reload_policy(tmp_path) == "be excellent\n"
+
+
+def test_mcp_announcements_only_new():
+    manifest = {"required_mcps": [{"name": "granola", "how": "auth in settings"},
+                                  {"name": "jira", "how": "oauth"}]}
+    applied = {"announced_mcps": ["granola"]}
+    out = mcp_announcements(manifest, applied)
+    assert [m["name"] for m in out] == ["jira"]

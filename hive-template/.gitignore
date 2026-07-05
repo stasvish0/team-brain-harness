@@ -1,3 +1,6 @@
 # Private, per-client content: NEVER synced to the live hive.
 /private/
 .claude/skills-local/
+# Client-local control-plane state: NEVER synced.
+/.applied.json
+/.control-block

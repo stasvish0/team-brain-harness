@@ -25,6 +25,25 @@ def setup_client(remote_url, dest):
     shutil.copytree(CLIENT_KIT / ".claude", dest / ".claude", dirs_exist_ok=True)
     shutil.copy2(CLIENT_KIT / "publish_allowlist.txt", dest / "publish_allowlist.txt")
     shutil.copytree(LIB, dest / "lib", dirs_exist_ok=True)
+    # Materialize the shared skills mirror and seed control-plane bookkeeping so a
+    # fresh client starts current (the clone already carries the post-migration tree).
+    # A real hive always ships CONTROL/manifest.json; guard for manifest-less clones.
+    if (dest / "CONTROL" / "manifest.json").is_file():
+        if str(dest) not in sys.path:
+            sys.path.insert(0, str(dest))
+        from lib.control_plane import sync_skills, read_manifest, write_applied, _migration_id
+        sync_skills(dest)
+        manifest = read_manifest(dest)
+        migs = sorted((dest / "CONTROL" / "migrations").glob("*.json")) \
+            if (dest / "CONTROL" / "migrations").is_dir() else []
+        mig_ids = [i for i in (_migration_id(p) for p in migs) if i is not None]
+        structure_version = max(mig_ids, default=0)
+        write_applied(dest, {
+            "skills_version": manifest.get("skills_version", 0),
+            "structure_version": structure_version,
+            "policy_version": manifest.get("policy_version", 0),
+            "announced_mcps": [m["name"] for m in manifest.get("required_mcps", [])],
+        })
     for d in PRIVATE_DIRS:
         (dest / "private" / d).mkdir(parents=True, exist_ok=True)
     (dest / "private" / "TODO.md").write_text("# TODO\n")
@@ -33,7 +52,8 @@ def setup_client(remote_url, dest):
     # .gitignore in production; listing it here is defense-in-depth and makes the
     # private tree ignored even when cloned from a plain remote.
     exclude = dest / ".git" / "info" / "exclude"
-    exclude.write_text("/private/\n/lib/\n/.claude/\n/publish_allowlist.txt\n")
+    exclude.write_text("/private/\n/lib/\n/.claude/\n/publish_allowlist.txt\n"
+                       "/.applied.json\n/.control-block\n")
     return dest
 
 if __name__ == "__main__":

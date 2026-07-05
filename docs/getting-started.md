@@ -115,6 +115,28 @@ It prints `pushed` when something went up, or `nothing-to-publish` when nothing 
 
 **Process a meeting into a shared record.** After a meeting whose raw transcript you saved under `private/personal-meetings/`, run the `/process-meeting` skill in your assistant. It summarizes your transcript into a structured contribution (decisions, action items, notes), writes it to `meetings/<id>/_inbox/<you>.md`, and publishes it. The raw transcript never leaves your machine; only the summary is shared. You do not merge by hand: the next teammate's session-start hook automatically rolls up every attendee's contribution into one canonical note (`meetings/<id>/<slug>.md`), deletes the inbox, and pushes. Re-runs and late contributions fold into the same note, deterministically.
 
+### Admin: evolve the hive
+
+To change the shared system for everyone, edit `CONTROL/manifest.json` (bump the relevant version) and add the change alongside it, then push. Every client converges on its next session start:
+
+- **Structure change** (new/moved/renamed shared folders): add a `CONTROL/migrations/NNNN-slug.json` with declarative ops, and bump `structure_version`.
+- **New or updated skill:** add or edit a skill under `CONTROL/skills/`, and bump `skills_version`. Each client mirrors it into its local `.claude/skills/`.
+- **New required MCP:** add a `{ "name": ..., "how": ... }` entry to `required_mcps`. Each client announces it once at session start.
+- **Standing rules:** edit `CONTROL/policy.md` and bump `policy_version`. Each client reloads it at session start.
+
+Breaking migrations carry a `min_client_version`; clients whose harness is too old safe-halt (a `.control-block` file, a clear message) instead of applying it, until they re-run `setup_client` against a newer harness.
+
+### Purge leaked data (admin)
+
+If private data leaked into shared history, scrub it from all git history. Dry-run first, then execute with `--force`:
+
+```bash
+python3 tools/purge.py path/to/leaked-file          # dry-run: prints what it would do
+python3 tools/purge.py path/to/leaked-file --force  # rewrites all history
+```
+
+Then follow the printed runbook: force-push the rewritten history, tell every member to re-clone (their old clones still contain the data), and rotate any exposed secret.
+
 ### What a standup looks like
 
 ```mermaid
@@ -141,6 +163,8 @@ sequenceDiagram
 | Pull latest (manual) | `python3 .claude/hooks/sync_pull.py --repo <clone>` |
 | Publish shared changes | `python3 .claude/hooks/publish.py --repo <clone> --allowlist <clone>/publish_allowlist.txt --message "..."` |
 | Process a meeting into a shared contribution | run the `/process-meeting` skill in your assistant |
+| Evolve the hive (admin) | edit `CONTROL/` + push |
+| Purge leaked data (admin) | `python3 tools/purge.py <path> --force` |
 | Run the test suite | `./.venv/bin/python -m pytest -q` |
 
 The two tools also expose plain functions if you prefer: `from tools.instantiate import instantiate` and `from tools.setup_client import setup_client`.
