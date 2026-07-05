@@ -115,7 +115,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pytest -q
 ```
 
-A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (12 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop and the privacy invariant.
+A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (72 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop, the meeting roll-up, the control-plane reconciliation, and the privacy invariant.
 
 ## License
 
