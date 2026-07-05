@@ -71,12 +71,12 @@ def test_read_health_config_reads_file(tmp_path):
 
 def test_parse_frontmatter_scalars_quotes_comments(tmp_path):
     f = tmp_path / "n.md"
-    f.write_text('---\ntitle: "Adopt X"\ntype: decision\n'
+    f.write_text('---\ntitle: "Adopt X # 2"\ntype: decision\n'
                  'last_verified: 2026-07-05  # stamped\nreview_by: 2026-12-31\n---\nbody\n')
     fm = parse_frontmatter(f)
-    assert fm["title"] == "Adopt X"
+    assert fm["title"] == "Adopt X # 2"   # '#' inside quotes is preserved
     assert fm["type"] == "decision"
-    assert fm["last_verified"] == "2026-07-05"
+    assert fm["last_verified"] == "2026-07-05"   # inline comment stripped
     assert fm["review_by"] == "2026-12-31"
 
 def test_parse_frontmatter_none_when_no_block(tmp_path):
@@ -137,12 +137,17 @@ def parse_frontmatter(path):
         key, _, value = line.partition(":")
         key = key.strip()
         value = value.strip()
-        # strip an inline " # comment" (only when preceded by whitespace)
-        m = re.search(r"\s+#", value)
-        if m:
-            value = value[:m.start()].strip()
-        if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
-            value = value[1:-1]
+        if value[:1] in "\"'":
+            # quoted value: take the content up to the matching quote, ignore any
+            # trailing inline comment (and any '#' inside the quotes)
+            q = value[0]
+            end = value.find(q, 1)
+            value = value[1:end] if end != -1 else value[1:]
+        else:
+            # unquoted value: strip an inline " # comment" (whitespace before '#')
+            m = re.search(r"\s+#", value)
+            if m:
+                value = value[:m.start()].strip()
         if key:
             fm[key] = value
     return fm
@@ -170,7 +175,7 @@ CFG = {"default_horizon_days": 180, "horizons": {"project": 30, "decision": 365}
 
 def test_status_fresh_within_horizon():
     fm = {"type": "project", "last_verified": "2026-07-01"}
-    assert note_status(fm, date(2026, 7, 05 if False else 5), CFG) == "fresh"
+    assert note_status(fm, date(2026, 7, 5), CFG) == "fresh"
 
 def test_status_stale_past_horizon():
     fm = {"type": "project", "last_verified": "2026-05-01"}  # >30d before today
@@ -222,7 +227,7 @@ def note_status(frontmatter, today, config):
     return "fresh"
 ```
 
-- [ ] **Step 4: Run to verify it passes** (fix the silly `05 if False else 5` in the first test to just `5` when you paste). Expected PASS.
+- [ ] **Step 4: Run to verify it passes** (6 passed).
 - [ ] **Step 5: Commit** (`feat: note_status date math`).
 
 ---
