@@ -36,11 +36,11 @@ The session-start hook does only fast, read-only date math (scan + warn). The he
 ## 4. Architecture
 
 ### 4.1 New module: `lib/freshness.py`
-- `read_health_config(repo) -> dict` — read `CONTROL/health.json`; return a sensible default (default_horizon 180, empty per-type map, a default scan-root list) if the file is absent.
+- `read_health_config(repo) -> dict` — read `CONTROL/health.json`; if the file is absent, return a non-empty default: `default_horizon_days` 180, an empty per-type `horizons` map, and a default `scan_roots` list equal to the shared knowledge dirs plus `private` (`["org","product","engineering","design","customers","market","knowledge","projects","decisions","private"]`) so the check never silently does nothing.
 - `parse_frontmatter(path) -> dict | None` — minimal scalar reader (see 4.2); returns the parsed scalar fields or None when there is no front-matter block.
 - `note_status(frontmatter, today, config) -> str` — `"expired"` / `"stale"` / `"fresh"` (see 4.3). Returns None/`"untracked"` for a note without `last_verified`.
-- `scan(repo, config, today) -> list[dict]` — walk each existing scan root, parse front-matter, classify; return `[{path, type, status, last_verified, age_days}]` for tracked notes only.
-- `stamp(path, today) -> None` — rewrite the note's `last_verified` line to `today` in place, atomically (temp + `os.replace`), preserving all other front-matter and body bytes.
+- `scan(repo, config, today) -> list[dict]` — walk each scan root, **silently skipping any root that does not exist** (shared roots exist in the hive; `private/` exists only on a client; a missing root is not an error), parse front-matter, classify; return `[{path, type, status, last_verified, age_days}]` for tracked notes only.
+- `stamp(path, today) -> None` — rewrite the note's existing `last_verified:` line to `today` in place, atomically (temp + `os.replace`), preserving all other front-matter and body bytes. **Precondition:** `stamp` is only ever called on a note that `scan` returned, which by construction has a parseable `last_verified` line; if called on a note whose front-matter has no `last_verified` line, it raises (a precondition violation), never silently no-ops (a silent no-op would let the audit believe it stamped when it did not).
 - `find_duplicates(repo, config) -> list[list[str]]` — clusters of tracked notes whose normalized body content hashes equal (near-duplicates).
 
 All functions that depend on the current date take `today` as an explicit parameter, so tests are deterministic; the hook and skill pass `datetime.date.today()`.
@@ -63,26 +63,28 @@ Because the harness is stdlib-only, `parse_frontmatter` does NOT use a YAML libr
 
 ### 4.3 Status computation (pure date math)
 Given `today` (a `date`) and a note's front-matter:
-1. If `review_by` is present and `today > review_by` -> `"expired"` (hard override, highest priority).
+1. If `review_by` is present and `today > review_by` -> `"expired"` (hard override, highest priority). The boundary is exclusive: on `review_by` itself the note is not yet expired; it expires the day after (matching the strict-inequality staleness rule below).
 2. Else if `last_verified` is present and `(today - last_verified).days > horizon` -> `"stale"`, where `horizon = config["horizons"].get(type, config["default_horizon_days"])`.
 3. Else -> `"fresh"`.
 A note without a parseable `last_verified` is untracked (excluded from `scan` output).
 
 ### 4.4 Session-start check (hook wiring)
-`client-kit/.claude/hooks/sync_pull.py`, in the non-blocked path after the control plane and before/after roll-up, calls `scan(repo, read_health_config(repo), date.today())` and prints a concise summary plus one line per stale/expired note, for example:
+`client-kit/.claude/hooks/sync_pull.py` calls `scan(repo, read_health_config(repo), date.today())` as the **final step of the non-blocked path, after `roll_up_all`**, and prints a concise summary plus one line per stale/expired note, for example:
 ```
 freshness: 2 stale, 1 expired  (run /hive-audit to re-verify)
   STALE   engineering/adr-001.md  (verified 210d ago, horizon 180d)
   EXPIRED decisions/2026/q1-plan.md  (review_by 2026-06-01)
 ```
-It is read-only, writes nothing, and persists no state (recomputed each session). It scans `private/` too (local read). A gated client never reaches this code (the hook returns early on a control-plane block), so a too-old client emits no freshness output.
+It is read-only, writes nothing, and persists no state (recomputed each session). It scans `private/` too (local read). **Placement requirement:** the freshness call MUST be after the `if cp["blocked"]: return` block, so a gated (too-old) client never reaches it and emits no freshness output. This is a required placement, not an emergent property.
 
 ### 4.5 The `/hive-audit` skill + deterministic helpers
 Vendored via `client-kit/skills/hive-audit/SKILL.md` (so `instantiate` copies it into `CONTROL/skills/` and the sub-project-3 skills mirror delivers it to each client's `.claude/skills/`, exactly like `process-meeting`). On demand:
 1. `scan` -> stale/expired notes.
 2. For each, the assistant re-verifies against live/current knowledge. Still true -> `stamp(path, today)`. Not true -> escalate a rewrite or deletion to the human (never auto-deletes or rewrites shared knowledge).
 3. `find_duplicates` -> near-duplicate clusters; the skill surfaces them and escalates merges to the human (auto-merging shared notes is destructive).
-4. Commit + push the stamped **shared** notes as one transaction via `push_paths` (exactly the stamped shared paths). Stamps to `private/` notes are edited in place and never pushed (gitignored).
+4. Commit + push the stamped **shared** notes as one transaction via `push_paths`, passing **only the concrete shared note paths it stamped** (never `private/...`, never `.applied.json`/`.control-block`). `push_paths` stages exactly those pathspecs and does not re-filter, so passing only shared note paths is the guarantee; gitignore is the backstop (`private/`, `.applied.json`, `.control-block` are all gitignored, so a stray path would stage nothing). Stamps to `private/` notes are edited in place and never pushed (gitignored).
+
+**Push-conflict handling:** `push_paths` raises `RuntimeError` on a real rebase conflict. The audit does NOT swallow it: it surfaces the failure to the user (the stamp did not land; retry the audit) and leaves the repo clean the way `push_paths` does (it aborts its own rebase). Any `private/` stamps already written locally simply remain; re-running the audit re-stamps idempotently (a stamp to the same `today` is an empty diff), so a failed shared push never corrupts state or double-counts.
 
 ### 4.6 Config and template files (in `hive-template/`)
 - `CONTROL/health.json` seeded with `default_horizon_days`, a `horizons` map (e.g. reference 180, project 30, decision 365, knowledge 180), and a `scan_roots` list (the shared knowledge dirs plus `private`).
