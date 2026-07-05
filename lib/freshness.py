@@ -99,3 +99,29 @@ def scan(repo, config, today):
                 "age_days": (today - lv).days,
             })
     return out
+
+
+def _atomic_write(path, text):
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def stamp(path, today):
+    """Rewrite the note's existing `last_verified:` line to `today`. Raises
+    ValueError if the note has no front-matter block or no last_verified line."""
+    path = Path(path)
+    lines = path.read_text().splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise ValueError(f"no front-matter block: {path}")
+    new_iso = today.isoformat()
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            break
+        if lines[i].split(":", 1)[0].strip() == "last_verified":
+            eol = "\n" if lines[i].endswith("\n") else ""
+            lines[i] = f"last_verified: {new_iso}{eol}"
+            _atomic_write(path, "".join(lines))
+            return
+    raise ValueError(f"no last_verified line in front-matter: {path}")

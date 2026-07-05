@@ -1,6 +1,8 @@
 from datetime import date
 
-from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status, scan
+import pytest
+
+from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status, scan, stamp
 
 CFG = {"default_horizon_days": 180, "horizons": {"project": 30, "decision": 365}}
 
@@ -108,3 +110,31 @@ def test_scan_classifies_and_skips_untracked(tmp_path):
 def test_scan_missing_root_is_silent(tmp_path):
     cfg = {"default_horizon_days": 180, "horizons": {}, "scan_roots": ["ghost"]}
     assert scan(tmp_path, cfg, date(2026, 7, 5)) == []
+
+
+def test_stamp_updates_only_last_verified(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text('---\ntitle: "Keep Me"\ntype: decision\n'
+                 'last_verified: 2025-01-01\nreview_by: 2026-12-31\n---\n# Keep Me\nbody line\n')
+    stamp(f, date(2026, 7, 5))
+    text = f.read_text()
+    assert "last_verified: 2026-07-05" in text
+    assert "2025-01-01" not in text
+    assert 'title: "Keep Me"' in text
+    assert "review_by: 2026-12-31" in text
+    assert "# Keep Me\nbody line\n" in text
+
+
+def test_stamp_is_idempotent(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text("---\ntype: reference\nlast_verified: 2026-07-05\n---\nbody\n")
+    before = f.read_text()
+    stamp(f, date(2026, 7, 5))
+    assert f.read_text() == before
+
+
+def test_stamp_raises_without_last_verified_line(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text("---\ntype: reference\n---\nbody\n")
+    with pytest.raises(ValueError):
+        stamp(f, date(2026, 7, 5))
