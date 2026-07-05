@@ -13,12 +13,15 @@ def _repo_root(start):
 
 sys.path.insert(0, str(_repo_root(__file__)))
 from lib.gitsync import pull
+from lib.meeting_rollup import roll_up_all
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True)
     a = ap.parse_args()
     print(pull(a.repo))
+    for name, status in roll_up_all(a.repo):
+        print(f"rollup {name}: {status}")
 
 if __name__ == "__main__":
     main()
