@@ -47,6 +47,15 @@ def test_parse_frontmatter_missing_last_verified(tmp_path):
     assert fm is not None and "last_verified" not in fm
 
 
+def test_parse_frontmatter_empty_value_does_not_crash(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text("---\ntitle:\nreview_by:\ntype: reference\nlast_verified: 2026-07-05\n---\nbody\n")
+    fm = parse_frontmatter(f)  # must not raise
+    assert fm["title"] == ""
+    assert fm["review_by"] == ""
+    assert fm["last_verified"] == "2026-07-05"
+
+
 def test_status_fresh_within_horizon():
     fm = {"type": "project", "last_verified": "2026-07-01"}
     assert note_status(fm, date(2026, 7, 5), CFG) == "fresh"

@@ -39,7 +39,7 @@ def parse_frontmatter(path):
         key, _, value = line.partition(":")
         key = key.strip()
         value = value.strip()
-        if value[:1] in "\"'":
+        if value and value[0] in "\"'":
             q = value[0]
             end = value.find(q, 1)
             value = value[1:end] if end != -1 else value[1:]
