@@ -1,4 +1,4 @@
-# team-brain-harness
+# team-brain-harness 
 
 ![status](https://img.shields.io/badge/status-2%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen)
 
