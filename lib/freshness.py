@@ -2,6 +2,7 @@
 via the /hive-audit skill. Stdlib only. See
 docs/superpowers/specs/2026-07-05-freshness-design.md."""
 import json
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -71,3 +72,30 @@ def note_status(frontmatter, today, config):
     if (today - lv).days > horizon:
         return "stale"
     return "fresh"
+
+
+def scan(repo, config, today):
+    repo = Path(repo)
+    out = []
+    for root in config.get("scan_roots", DEFAULT_SCAN_ROOTS):
+        base = repo / root
+        if not base.is_dir():
+            continue  # missing root skipped silently
+        for p in sorted(base.rglob("*.md")):
+            if not p.is_file():
+                continue
+            fm = parse_frontmatter(p)
+            if not fm:
+                continue
+            status = note_status(fm, today, config)
+            if status is None:
+                continue  # untracked
+            lv = _parse_date(fm.get("last_verified"))
+            out.append({
+                "path": p.relative_to(repo).as_posix(),
+                "type": fm.get("type"),
+                "status": status,
+                "last_verified": fm.get("last_verified"),
+                "age_days": (today - lv).days,
+            })
+    return out

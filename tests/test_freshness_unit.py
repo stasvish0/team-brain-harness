@@ -1,6 +1,6 @@
 from datetime import date
 
-from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status
+from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status, scan
 
 CFG = {"default_horizon_days": 180, "horizons": {"project": 30, "decision": 365}}
 
@@ -84,3 +84,27 @@ def test_status_expired_review_by_exclusive():
 
 def test_status_untracked_when_no_last_verified():
     assert note_status({"type": "project"}, date(2026, 7, 5), CFG) is None
+
+
+def _note(root, rel, lv, type_="reference", extra=""):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"---\ntype: {type_}\nlast_verified: {lv}\n{extra}---\nbody\n")
+
+
+def test_scan_classifies_and_skips_untracked(tmp_path):
+    cfg = {"default_horizon_days": 180, "horizons": {}, "scan_roots": ["engineering", "nope"]}
+    _note(tmp_path, "engineering/fresh.md", "2026-07-01")
+    _note(tmp_path, "engineering/stale.md", "2025-01-01")
+    (tmp_path / "engineering" / "plain.md").write_text("# no frontmatter\n")
+    results = scan(tmp_path, cfg, date(2026, 7, 5))
+    by_path = {r["path"]: r for r in results}
+    assert set(by_path) == {"engineering/fresh.md", "engineering/stale.md"}
+    assert by_path["engineering/fresh.md"]["status"] == "fresh"
+    assert by_path["engineering/stale.md"]["status"] == "stale"
+    assert by_path["engineering/stale.md"]["age_days"] > 180
+
+
+def test_scan_missing_root_is_silent(tmp_path):
+    cfg = {"default_horizon_days": 180, "horizons": {}, "scan_roots": ["ghost"]}
+    assert scan(tmp_path, cfg, date(2026, 7, 5)) == []
