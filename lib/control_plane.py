@@ -177,7 +177,9 @@ def mcp_announcements(manifest, applied):
 
 def _allowlisted(touched, allow_paths):
     for t in touched:
-        if not any(t == a.rstrip("/") or t.startswith(a) for a in allow_paths):
+        ok = any(t == a.rstrip("/") or t.startswith(a.rstrip("/") + "/")
+                 for a in allow_paths)
+        if not ok:
             return False
     return True
 
@@ -213,6 +215,7 @@ def apply_control_plane(repo, remote="origin", branch="main"):
         if touched and not _allowlisted(touched, allow):
             _atomic_write(block, f"migration {m['path'].name} touches non-allowlisted path\n")
             run_git(repo, "reset", "--hard", f"{remote}/{branch}", check=False)
+            run_git(repo, "clean", "-fd", check=False)
             result["blocked"] = True
             result["gate_reasons"] = [f"migration {m['path'].name} touches non-allowlisted path"]
             return result
@@ -222,6 +225,7 @@ def apply_control_plane(repo, remote="origin", branch="main"):
                            remote=remote, branch=branch)
             except RuntimeError:
                 run_git(repo, "reset", "--hard", f"{remote}/{branch}", check=False)
+                run_git(repo, "clean", "-fd", check=False)
                 result["deferred"] = True
                 return result
         applied["structure_version"] = m["id"]

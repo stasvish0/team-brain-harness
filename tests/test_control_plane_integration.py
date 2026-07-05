@@ -2,6 +2,7 @@ import json, subprocess
 from pathlib import Path
 from lib.gitsync import run_git, push_paths
 from lib.control_plane import apply_control_plane, read_applied
+import lib.control_plane as cp
 from tests.conftest import init_identity
 
 def _hive(bare_remote, tmp_path, name, manifest, allowlist="CONTROL/\nengineering/\n"):
@@ -71,3 +72,23 @@ def test_skills_and_mcp_and_policy_applied(bare_remote, tmp_path):
     assert ap["announced_mcps"] == ["granola"]
     res2 = apply_control_plane(d)
     assert res2["mcp_announcements"] == []
+
+def test_deferred_push_leaves_clean_tree_and_unadvanced(bare_remote, tmp_path, monkeypatch):
+    d = _hive(bare_remote, tmp_path, "c", _manifest(structure_version=1))
+    md = d / "CONTROL" / "migrations"; md.mkdir(parents=True)
+    (md / "0001-add-eng.json").write_text(json.dumps(
+        {"ops": [{"op": "keep_file", "path": "engineering/adr/.gitkeep"}]}))
+    run_git(d, "add", "-A"); run_git(d, "commit", "-m", "seed"); run_git(d, "push", "origin", "main")
+    # force the migration push to fail as if a concurrent conflict occurred
+    def _boom(*a, **k):
+        raise RuntimeError("simulated push conflict")
+    monkeypatch.setattr(cp, "push_paths", _boom)
+    res = cp.apply_control_plane(d)
+    assert res["deferred"] is True
+    # tree must be genuinely clean (no untracked migration residue) so the next pull works
+    porcelain = run_git(d, "status", "--porcelain").stdout.strip()
+    assert porcelain == "", f"dirty tree: {porcelain}"
+    assert not (d / "engineering" / "adr" / ".gitkeep").exists()
+    # bookkeeping not advanced: fresh clone has no .applied.json, so read_applied
+    # returns the default structure_version 0, and the deferred path must not advance it
+    assert cp.read_applied(d)["structure_version"] == 0
