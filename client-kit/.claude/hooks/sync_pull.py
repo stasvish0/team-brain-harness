@@ -13,6 +13,7 @@ def _repo_root(start):
 
 sys.path.insert(0, str(_repo_root(__file__)))
 from lib.gitsync import pull
+from lib.control_plane import apply_control_plane
 from lib.meeting_rollup import roll_up_all
 
 def main():
@@ -20,6 +21,23 @@ def main():
     ap.add_argument("--repo", required=True)
     a = ap.parse_args()
     print(pull(a.repo))
+    cp = apply_control_plane(a.repo)
+    if cp["blocked"]:
+        print("=== CONTROL PLANE: BLOCKED ===")
+        for r in cp["gate_reasons"]:
+            print(f"  - {r}")
+        print("Update your client (re-run setup_client with the latest harness), then restart.")
+        if cp["policy_text"]:
+            print(cp["policy_text"])
+        return
+    if cp["migrations_applied"]:
+        print(f"control: applied migrations {cp['migrations_applied']}")
+    if cp["skills_changed"]:
+        print(f"control: skills {cp['skills_changed']}")
+    for m in cp["mcp_announcements"]:
+        print(f"control: NEW MCP required: {m['name']} -> {m['how']}")
+    if cp["policy_text"]:
+        print(cp["policy_text"])
     for name, status in roll_up_all(a.repo):
         print(f"rollup {name}: {status}")
 

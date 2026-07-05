@@ -4,6 +4,8 @@ from lib.gitsync import run_git, push_paths
 from lib.control_plane import apply_control_plane, read_applied
 import lib.control_plane as cp
 from tests.conftest import init_identity
+from tools.instantiate import instantiate
+from tools.setup_client import setup_client
 
 def _hive(bare_remote, tmp_path, name, manifest, allowlist="CONTROL/\nengineering/\n"):
     d = tmp_path / name
@@ -92,3 +94,18 @@ def test_deferred_push_leaves_clean_tree_and_unadvanced(bare_remote, tmp_path, m
     # bookkeeping not advanced: fresh clone has no .applied.json, so read_applied
     # returns the default structure_version 0, and the deferred path must not advance it
     assert cp.read_applied(d)["structure_version"] == 0
+
+def _bare_from(local, tmp_path):
+    remote = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(remote)], check=True)
+    run_git(local, "remote", "add", "origin", str(remote))
+    run_git(local, "push", "origin", "main")
+    return remote
+
+def test_setup_client_seeds_applied_and_mirrors_skills(tmp_path):
+    hive = instantiate(tmp_path / "hive")
+    remote = _bare_from(hive, tmp_path)
+    client = setup_client(str(remote), tmp_path / "client")
+    assert (client / ".claude" / "skills" / "process-meeting" / "SKILL.md").exists()
+    ap = read_applied(client)
+    assert "skills_version" in ap and "announced_mcps" in ap
