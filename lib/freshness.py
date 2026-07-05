@@ -3,6 +3,7 @@ via the /hive-audit skill. Stdlib only. See
 docs/superpowers/specs/2026-07-05-freshness-design.md."""
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 DEFAULT_SCAN_ROOTS = ["org", "product", "engineering", "design", "customers",
@@ -49,3 +50,24 @@ def parse_frontmatter(path):
         if key:
             fm[key] = value
     return fm
+
+
+def _parse_date(s):
+    try:
+        return date.fromisoformat(str(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def note_status(frontmatter, today, config):
+    lv = _parse_date(frontmatter.get("last_verified"))
+    if lv is None:
+        return None  # untracked
+    rb = _parse_date(frontmatter.get("review_by"))
+    if rb is not None and today > rb:
+        return "expired"
+    horizon = config.get("horizons", {}).get(
+        frontmatter.get("type"), config.get("default_horizon_days", 180))
+    if (today - lv).days > horizon:
+        return "stale"
+    return "fresh"

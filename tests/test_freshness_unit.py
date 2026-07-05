@@ -1,4 +1,8 @@
-from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS
+from datetime import date
+
+from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status
+
+CFG = {"default_horizon_days": 180, "horizons": {"project": 30, "decision": 365}}
 
 
 def test_read_health_config_default_when_missing(tmp_path):
@@ -41,3 +45,33 @@ def test_parse_frontmatter_missing_last_verified(tmp_path):
     f.write_text("---\ntitle: x\ntype: reference\n---\nbody\n")
     fm = parse_frontmatter(f)
     assert fm is not None and "last_verified" not in fm
+
+
+def test_status_fresh_within_horizon():
+    fm = {"type": "project", "last_verified": "2026-07-01"}
+    assert note_status(fm, date(2026, 7, 5), CFG) == "fresh"
+
+
+def test_status_stale_past_horizon():
+    fm = {"type": "project", "last_verified": "2026-05-01"}
+    assert note_status(fm, date(2026, 7, 5), CFG) == "stale"
+
+
+def test_status_horizon_boundary_is_strict():
+    fm = {"type": "project", "last_verified": "2026-06-05"}  # exactly 30 days
+    assert note_status(fm, date(2026, 7, 5), CFG) == "fresh"
+
+
+def test_status_uses_default_horizon_for_unknown_type():
+    fm = {"type": "mystery", "last_verified": "2026-01-01"}  # >180d
+    assert note_status(fm, date(2026, 7, 5), CFG) == "stale"
+
+
+def test_status_expired_review_by_exclusive():
+    fm = {"type": "decision", "last_verified": "2026-07-01", "review_by": "2026-07-05"}
+    assert note_status(fm, date(2026, 7, 5), CFG) == "fresh"   # on review_by day: not yet expired
+    assert note_status(fm, date(2026, 7, 6), CFG) == "expired" # day after: expired
+
+
+def test_status_untracked_when_no_last_verified():
+    assert note_status({"type": "project"}, date(2026, 7, 5), CFG) is None
