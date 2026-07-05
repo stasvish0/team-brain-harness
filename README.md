@@ -1,6 +1,6 @@
 # team-brain-harness
 
-![status](https://img.shields.io/badge/status-2%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-37%20passing-brightgreen)
+![status](https://img.shields.io/badge/status-3%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)
 
 A shared, git-synced "team brain" that every member's AI assistant reads from and writes to, so the whole team's knowledge is one pull away, while each person's private notes never leave their machine.
 
@@ -55,6 +55,7 @@ flowchart LR
 - **Pull (downstream):** a SessionStart hook runs `git pull` so the assistant opens already caught up.
 - **Publish (upstream):** an explicit hook stages only allowlisted shared paths, commits, and pushes with fetch-rebase-retry so concurrent publishers never overwrite each other.
 - **Privacy is structural:** `private/` is gitignored *and* excluded locally, and publish never does `git add -A`. Two independent guards.
+- **Control plane (admin-driven evolution):** an admin edits `CONTROL/manifest.json` plus migrations, skills, or policy and pushes; each client reconciles on session start, applying safe changes (structure migrations, the skills mirror, policy reload, MCP announcements) and gating with a safe-halt when its harness is too old for a breaking migration.
 
 ## A day in the life: the standup
 
@@ -104,7 +105,7 @@ The full design and the implementation plan live in the repo:
 - Design spec: [docs/superpowers/specs/2026-07-03-group-hive-brain-design.md](docs/superpowers/specs/2026-07-03-group-hive-brain-design.md)
 - Walking-skeleton plan: [docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md](docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md)
 
-**Status:** this repo implements **sub-projects 1-2 of 5**: the walking skeleton (the vault + the two sync hooks + explicit-publish safety + concurrency-safe push) and the meeting roll-up (the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note). The remaining sub-projects are: 3) the control plane and client update mechanism, 4) TTL/freshness, 5) the full installer and onboarding.
+**Status:** this repo implements **sub-projects 1-3 of 5**: the walking skeleton (the vault + the two sync hooks + explicit-publish safety + concurrency-safe push), the meeting roll-up (the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note), and the control plane (an admin edits `CONTROL/`, clients converge on session start applying safe changes, with a gated safe-halt when a client is too old for a breaking migration). The remaining sub-projects are: 4) TTL/freshness, 5) the full installer and onboarding.
 
 ## Development
 
