@@ -13,6 +13,8 @@ from lib.control_plane import (
     pending_migrations,
     evaluate_gate,
     sync_skills,
+    reload_policy,
+    mcp_announcements,
 )
 
 
@@ -166,3 +168,18 @@ def test_sync_skills_leaves_skills_local_untouched(tmp_path):
     local.mkdir(parents=True); (local / "SKILL.md").write_text("MINE")
     sync_skills(tmp_path)
     assert (local / "SKILL.md").read_text() == "MINE"
+
+
+def test_reload_policy_reads_or_empty(tmp_path):
+    assert reload_policy(tmp_path) == ""
+    (tmp_path / "CONTROL").mkdir(exist_ok=True)
+    (tmp_path / "CONTROL" / "policy.md").write_text("be excellent\n")
+    assert reload_policy(tmp_path) == "be excellent\n"
+
+
+def test_mcp_announcements_only_new():
+    manifest = {"required_mcps": [{"name": "granola", "how": "auth in settings"},
+                                  {"name": "jira", "how": "oauth"}]}
+    applied = {"announced_mcps": ["granola"]}
+    out = mcp_announcements(manifest, applied)
+    assert [m["name"] for m in out] == ["jira"]

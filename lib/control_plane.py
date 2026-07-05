@@ -160,3 +160,13 @@ def sync_skills(repo):
             else:
                 break
     return {"added": added, "updated": updated, "deleted": deleted}
+
+
+def reload_policy(repo):
+    p = Path(repo) / "CONTROL" / "policy.md"
+    return p.read_text() if p.exists() else ""
+
+
+def mcp_announcements(manifest, applied):
+    announced = set(applied.get("announced_mcps", []))
+    return [m for m in manifest.get("required_mcps", []) if m["name"] not in announced]
