@@ -6,6 +6,9 @@ import os
 import shutil
 from pathlib import Path
 
+from lib.gitsync import run_git, push_paths, read_allowlist
+from lib.version import CLIENT_VERSION
+
 
 def version_tuple(s):
     """Parse a dotted version like '0.0.1' into a comparable tuple of ints."""
@@ -170,3 +173,76 @@ def reload_policy(repo):
 def mcp_announcements(manifest, applied):
     announced = set(applied.get("announced_mcps", []))
     return [m for m in manifest.get("required_mcps", []) if m["name"] not in announced]
+
+
+def _allowlisted(touched, allow_paths):
+    for t in touched:
+        if not any(t == a.rstrip("/") or t.startswith(a) for a in allow_paths):
+            return False
+    return True
+
+
+def apply_control_plane(repo, remote="origin", branch="main"):
+    repo = Path(repo)
+    manifest = read_manifest(repo)
+    applied = read_applied(repo)
+    pend = pending_migrations(repo, applied)
+    result = {"blocked": False, "gate_reasons": [], "migrations_applied": [],
+              "skills_changed": None, "policy_text": "", "mcp_announcements": [],
+              "deferred": False}
+    # Load policy up front so it is emitted even on the gated early-return.
+    result["policy_text"] = reload_policy(repo)
+    reasons = evaluate_gate(manifest, CLIENT_VERSION, [m["data"] for m in pend])
+    block = repo / ".control-block"
+    if reasons:
+        _atomic_write(block, "\n".join(reasons) + "\n")
+        result["blocked"] = True
+        result["gate_reasons"] = reasons
+        return result
+    if block.exists():
+        block.unlink()
+
+    allow = []
+    al = repo / "publish_allowlist.txt"
+    if al.exists():
+        allow = read_allowlist(al)
+
+    # 1. structure migrations (in order)
+    for m in pend:
+        touched = apply_migration(repo, m["data"])
+        if touched and not _allowlisted(touched, allow):
+            _atomic_write(block, f"migration {m['path'].name} touches non-allowlisted path\n")
+            run_git(repo, "reset", "--hard", f"{remote}/{branch}", check=False)
+            result["blocked"] = True
+            result["gate_reasons"] = [f"migration {m['path'].name} touches non-allowlisted path"]
+            return result
+        if touched:
+            try:
+                push_paths(repo, f"migrate: {m['path'].name}", sorted(touched),
+                           remote=remote, branch=branch)
+            except RuntimeError:
+                run_git(repo, "reset", "--hard", f"{remote}/{branch}", check=False)
+                result["deferred"] = True
+                return result
+        applied["structure_version"] = m["id"]
+        write_applied(repo, applied)
+        result["migrations_applied"].append(m["path"].name)
+
+    # 2. skills mirror
+    if manifest.get("skills_version", 0) != applied.get("skills_version", 0):
+        result["skills_changed"] = sync_skills(repo)
+        applied["skills_version"] = manifest.get("skills_version", 0)
+        write_applied(repo, applied)
+
+    # 3. policy reload (policy_text already loaded at the top)
+    if manifest.get("policy_version", 0) != applied.get("policy_version", 0):
+        applied["policy_version"] = manifest.get("policy_version", 0)
+        write_applied(repo, applied)
+
+    # 4. MCP announcements
+    result["mcp_announcements"] = mcp_announcements(manifest, applied)
+    if result["mcp_announcements"]:
+        applied["announced_mcps"] = list(applied.get("announced_mcps", [])) + \
+            [m["name"] for m in result["mcp_announcements"]]
+        write_applied(repo, applied)
+    return result
