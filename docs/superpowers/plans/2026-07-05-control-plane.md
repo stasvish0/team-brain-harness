@@ -136,6 +136,21 @@ def test_read_manifest_reads_control_manifest(tmp_path):
                     "policy_version": 1}))
     m = read_manifest(tmp_path)
     assert m["skills_version"] == 1 and m["min_client_version"] == "0.0.1"
+
+def test_write_applied_is_atomic_on_crash(tmp_path, monkeypatch):
+    # pre-seed a valid file, then make the replace step fail mid-write
+    good = {"skills_version": 1, "structure_version": 1,
+            "policy_version": 1, "announced_mcps": []}
+    write_applied(tmp_path, good)
+    import lib.control_plane as cp
+    monkeypatch.setattr(cp.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    try:
+        write_applied(tmp_path, {"skills_version": 99})
+    except OSError:
+        pass
+    # the original file survived intact (temp-file + replace never clobbered it)
+    assert read_applied(tmp_path) == good
 ```
 
 - [ ] **Step 2: Run to verify it fails** (ImportError).
@@ -288,7 +303,9 @@ def apply_migration(repo, migration):
     return touched
 
 def _migration_id(path):
-    return int(Path(path).name.split("-", 1)[0])
+    """Leading integer of an 'NNNN-slug.json' filename, or None if not numeric."""
+    head = Path(path).name.split("-", 1)[0]
+    return int(head) if head.isdigit() else None
 
 def pending_migrations(repo, applied):
     md = Path(repo) / "CONTROL" / "migrations"
@@ -297,6 +314,8 @@ def pending_migrations(repo, applied):
     out = []
     for p in sorted(md.glob("*.json")):
         mid = _migration_id(p)
+        if mid is None:
+            continue  # skip mis-named files rather than crashing the session
         if mid > applied.get("structure_version", 0):
             out.append({"id": mid, "path": p, "data": json.loads(p.read_text())})
     return sorted(out, key=lambda m: m["id"])
@@ -593,6 +612,9 @@ def apply_control_plane(repo, remote="origin", branch="main"):
     result = {"blocked": False, "gate_reasons": [], "migrations_applied": [],
               "skills_changed": None, "policy_text": "", "mcp_announcements": [],
               "deferred": False}
+    # Load policy up front so it is emitted even on the gated early-return (the
+    # block clause telling the assistant to stop matters most exactly when gated).
+    result["policy_text"] = reload_policy(repo)
     reasons = evaluate_gate(manifest, CLIENT_VERSION, [m["data"] for m in pend])
     block = repo / ".control-block"
     if reasons:
@@ -633,13 +655,12 @@ def apply_control_plane(repo, remote="origin", branch="main"):
     # 2. skills mirror
     if manifest.get("skills_version", 0) != applied.get("skills_version", 0):
         result["skills_changed"] = sync_skills(repo)
-        applied["skills_version"] = manifest["skills_version"]
+        applied["skills_version"] = manifest.get("skills_version", 0)
         write_applied(repo, applied)
 
-    # 3. policy reload
-    result["policy_text"] = reload_policy(repo)
+    # 3. policy reload (policy_text already loaded at the top)
     if manifest.get("policy_version", 0) != applied.get("policy_version", 0):
-        applied["policy_version"] = manifest["policy_version"]
+        applied["policy_version"] = manifest.get("policy_version", 0)
         write_applied(repo, applied)
 
     # 4. MCP announcements
@@ -734,7 +755,8 @@ def main():
     manifest = read_manifest(dest)
     migs = sorted((dest / "CONTROL" / "migrations").glob("*.json")) \
         if (dest / "CONTROL" / "migrations").is_dir() else []
-    structure_version = max((_migration_id(p) for p in migs), default=0)
+    mig_ids = [i for i in (_migration_id(p) for p in migs) if i is not None]
+    structure_version = max(mig_ids, default=0)
     write_applied(dest, {
         "skills_version": manifest.get("skills_version", 0),
         "structure_version": structure_version,
@@ -750,6 +772,8 @@ def main():
     return dest
 ```
 (Keep the existing clone/config/`.claude`/allowlist lines above unchanged.)
+
+> **Note:** the seed derives `structure_version` from the migration filenames, NOT from `manifest.structure_version`. The manifest's `structure_version` field is not read by any code path (`pending_migrations` compares only against `.applied.json`); it is informational. Do not "fix" the seed to read it.
 
 - [ ] **Step 5: Write an integration test for provisioning**
 
