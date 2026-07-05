@@ -1,0 +1,51 @@
+"""Freshness / TTL: track last_verified on notes, warn on staleness, re-verify
+via the /hive-audit skill. Stdlib only. See
+docs/superpowers/specs/2026-07-05-freshness-design.md."""
+import json
+import re
+from pathlib import Path
+
+DEFAULT_SCAN_ROOTS = ["org", "product", "engineering", "design", "customers",
+                      "market", "knowledge", "projects", "decisions", "private"]
+
+
+def read_health_config(repo):
+    p = Path(repo) / "CONTROL" / "health.json"
+    if not p.exists():
+        return {"default_horizon_days": 180, "horizons": {},
+                "scan_roots": list(DEFAULT_SCAN_ROOTS)}
+    cfg = json.loads(p.read_text())
+    cfg.setdefault("default_horizon_days", 180)
+    cfg.setdefault("horizons", {})
+    cfg.setdefault("scan_roots", list(DEFAULT_SCAN_ROOTS))
+    return cfg
+
+
+def parse_frontmatter(path):
+    """Minimal scalar front-matter reader (NOT full YAML). Returns a dict of
+    scalar key/value pairs from a leading '--- ... ---' block, or None if the
+    file has no such block."""
+    text = Path(path).read_text()
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    fm = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if value[:1] in "\"'":
+            q = value[0]
+            end = value.find(q, 1)
+            value = value[1:end] if end != -1 else value[1:]
+        else:
+            m = re.search(r"\s+#", value)
+            if m:
+                value = value[:m.start()].strip()
+        if key:
+            fm[key] = value
+    return fm
