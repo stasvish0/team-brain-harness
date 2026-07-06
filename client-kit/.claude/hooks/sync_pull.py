@@ -27,7 +27,7 @@ def main():
         print("=== CONTROL PLANE: BLOCKED ===")
         for r in cp["gate_reasons"]:
             print(f"  - {r}")
-        print("Update your client (re-run setup_client with the latest harness), then restart.")
+        print("Update your client: run  python3 tools/install.py --update <this-clone>  then restart.")
         if cp["policy_text"]:
             print(cp["policy_text"])
         return

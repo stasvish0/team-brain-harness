@@ -1,6 +1,6 @@
 # team-brain-harness
 
-![status](https://img.shields.io/badge/status-4%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-97%20passing-brightgreen)
+![status](https://img.shields.io/badge/status-5%2F5%20complete-brightgreen) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-108%20passing-brightgreen)
 
 A shared, git-synced "team brain" that every member's AI assistant reads from and writes to, so the whole team's knowledge is one pull away, while each person's private notes never leave their machine.
 
@@ -57,6 +57,7 @@ flowchart LR
 - **Privacy is structural:** `private/` is gitignored *and* excluded locally, and publish never does `git add -A`. Two independent guards.
 - **Control plane (admin-driven evolution):** an admin edits `CONTROL/manifest.json` plus migrations, skills, or policy and pushes; each client reconciles on session start, applying safe changes (structure migrations, the skills mirror, policy reload, MCP announcements) and gating with a safe-halt when its harness is too old for a breaking migration.
 - **Freshness (knowledge that ages):** shared notes carry a `last_verified` date in their front-matter; the session-start hook warns about notes that have gone stale (past their type's horizon) or expired (past an optional `review_by`). Run the `/hive-audit` skill to re-verify the ones still true and stamp them fresh (a single allowlisted push), while it surfaces near-duplicates for you to merge. Horizons per note type live in `CONTROL/health.json`.
+- **Installer and onboarding:** a member runs `python3 tools/install.py <hive-url> <dest> --name --email --role` for a one-command setup (preflight checks, provision the client, seed a private profile with a stable `handle:`). `python3 tools/install.py --update <clone>` re-vendors the client's harness-owned code in place while preserving private notes, identity, and control-plane state (this is also how you clear a `min_client_version` block). On first run, the `/onboarding` skill interviews the member to finish their profile.
 
 ## A day in the life: the standup
 
@@ -95,8 +96,10 @@ python3 tools/instantiate.py ~/acme-hive
 # ...create an empty private repo on GitHub, then:
 cd ~/acme-hive && git remote add origin git@github.com:ACME/acme-hive.git && git push -u origin main
 
-# 2. Each member: provision a local client against the hive
-python3 tools/setup_client.py git@github.com:ACME/acme-hive.git ~/acme-brain
+# 2. Each member: install a local client against the hive
+python3 tools/install.py git@github.com:ACME/acme-hive.git ~/acme-brain \
+  --name "Ada Lovelace" --email ada@acme.com --role engineer
+# then point your assistant at ~/acme-brain and run /onboarding to finish your profile
 ```
 
 ## Design
@@ -106,7 +109,13 @@ The full design and the implementation plan live in the repo:
 - Design spec: [docs/superpowers/specs/2026-07-03-group-hive-brain-design.md](docs/superpowers/specs/2026-07-03-group-hive-brain-design.md)
 - Walking-skeleton plan: [docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md](docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md)
 
-**Status:** this repo implements **sub-projects 1-4 of 5**: the walking skeleton (the vault + the two sync hooks + explicit-publish safety + concurrency-safe push), the meeting roll-up (the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note), the control plane (an admin edits `CONTROL/`, clients converge on session start applying safe changes, with a gated safe-halt when a client is too old for a breaking migration), and TTL/freshness (notes carry `last_verified`, the session-start hook warns on stale/expired notes, and the `/hive-audit` skill re-verifies and stamps them with horizons in `CONTROL/health.json`). The remaining sub-project is: 5) the full installer and onboarding.
+**Status:** feature-complete. This repo implements **all 5 of 5 sub-projects**:
+
+1. **Walking skeleton:** the vault + the two sync hooks + explicit-publish safety + concurrency-safe push.
+2. **Meeting roll-up:** the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note.
+3. **Control plane:** an admin edits `CONTROL/`, clients converge on session start applying safe changes, with a gated safe-halt when a client is too old for a breaking migration.
+4. **TTL/freshness:** notes carry `last_verified`, the session-start hook warns on stale/expired notes, and the `/hive-audit` skill re-verifies and stamps them with horizons in `CONTROL/health.json`.
+5. **Installer and onboarding:** the one-command `tools/install.py` (preflight, provision, seed profile), `--update` for in-place client refresh, and the `/onboarding` skill for first-run profile enrichment.
 
 ## Development
 
@@ -116,7 +125,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pytest -q
 ```
 
-A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (97 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop, the meeting roll-up, the control-plane reconciliation, the freshness re-verify loop, and the privacy invariant.
+A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (108 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop, the meeting roll-up, the control-plane reconciliation, the freshness re-verify loop, the installer end-to-end flow, and the privacy invariant.
 
 ## License
 
