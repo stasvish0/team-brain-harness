@@ -1,5 +1,9 @@
+import subprocess
+from pathlib import Path
+
 import tools.install as install_mod
-from tools.install import preflight, _is_github_ssh
+from tools.install import preflight, _is_github_ssh, install
+from lib.gitsync import run_git
 
 def test_is_github_ssh():
     assert _is_github_ssh("git@github.com:acme/hive.git")
@@ -22,3 +26,20 @@ def test_preflight_checks_ssh_for_github_remote(monkeypatch):
     monkeypatch.setattr(install_mod, "ssh_ok", lambda: False)
     problems = preflight("git@github.com:acme/hive.git")
     assert any("SSH" in p or "ssh" in p for p in problems)
+
+def test_install_sets_identity_profile_and_working_client(bare_remote, tmp_path):
+    dest = install(str(bare_remote), tmp_path / "c",
+                   name="Ada", email="ada.lovelace@x.com", role="eng")
+    assert run_git(dest, "config", "user.email").stdout.strip() == "ada.lovelace@x.com"
+    prof = (dest / "private" / "personal-context" / "profile.md").read_text()
+    assert "# Ada" in prof and "- role: eng" in prof
+    assert "- handle: ada-lovelace" in prof
+    assert (dest / ".claude" / "hooks" / "sync_pull.py").exists()
+
+def test_install_prompt_fallback_errors_non_tty(monkeypatch):
+    import tools.install as im
+    monkeypatch.setattr(im.sys, "stdin",
+                        type("S", (), {"isatty": staticmethod(lambda: False)})())
+    import pytest
+    with pytest.raises(SystemExit):
+        im._prompt_if_missing("", "email")

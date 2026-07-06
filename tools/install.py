@@ -40,3 +40,26 @@ def preflight(remote_url):
             "  ssh-keygen -t ed25519 -C \"your-email\"\n"
             "then paste ~/.ssh/id_ed25519.pub at https://github.com/settings/keys and re-run.")
     return problems
+
+def install(remote_url, dest, name, email, role):
+    problems = preflight(remote_url)
+    if problems:
+        for p in problems:
+            print("PREFLIGHT: " + p, file=sys.stderr)
+        raise SystemExit(1)
+    dest = Path(dest)
+    setup_client(remote_url, dest, name=name, email=email)
+    handle = slugify(email.split("@")[0])
+    write_profile(dest, name, role, handle)
+    print(f"Installed client at {dest}.")
+    print(f"  identity: {name} <{email}>   handle: {handle}   role: {role}")
+    print("Next: point your AI assistant at this directory and run /onboarding.")
+    return dest
+
+def _prompt_if_missing(value, label):
+    if value:
+        return value
+    if sys.stdin.isatty():
+        return input(f"{label}: ").strip()
+    print(f"error: --{label} is required (stdin is not a TTY)", file=sys.stderr)
+    raise SystemExit(2)
