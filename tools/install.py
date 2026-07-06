@@ -56,6 +56,35 @@ def install(remote_url, dest, name, email, role):
     print("Next: point your AI assistant at this directory and run /onboarding.")
     return dest
 
+def _mirror(src, dst):
+    """Copy src tree into dst, deleting files in dst not present in src. Ignores
+    __pycache__ on both sides."""
+    src, dst = Path(src), Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    def files(base):
+        return {p.relative_to(base) for p in base.rglob("*")
+                if p.is_file() and "__pycache__" not in p.parts}
+    src_files = files(src)
+    dst_files = files(dst)
+    for rel in sorted(src_files):
+        d = dst / rel
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src / rel, d)
+    for rel in sorted(dst_files - src_files):
+        (dst / rel).unlink()
+
+def update(dest):
+    """Re-vendor only harness-owned client code; preserve all local state."""
+    dest = Path(dest)
+    _mirror(LIB, dest / "lib")
+    _mirror(CLIENT_KIT / ".claude" / "hooks", dest / ".claude" / "hooks")
+    shutil.copy2(CLIENT_KIT / ".claude" / "settings.local.json",
+                 dest / ".claude" / "settings.local.json")
+    shutil.copy2(CLIENT_KIT / "publish_allowlist.txt", dest / "publish_allowlist.txt")
+    print(f"Updated client code at {dest} "
+          "(private data, identity, and control-plane state preserved).")
+    return dest
+
 def _prompt_if_missing(value, label):
     if value:
         return value

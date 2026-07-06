@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 import tools.install as install_mod
-from tools.install import preflight, _is_github_ssh, install
+from tools.install import preflight, _is_github_ssh, install, update
 from lib.gitsync import run_git
 
 def test_is_github_ssh():
@@ -43,3 +43,23 @@ def test_install_prompt_fallback_errors_non_tty(monkeypatch):
     import pytest
     with pytest.raises(SystemExit):
         im._prompt_if_missing("", "email")
+
+def test_update_revendors_code_deletes_stale_preserves_local(bare_remote, tmp_path):
+    dest = install(str(bare_remote), tmp_path / "c",
+                   name="Ada", email="ada@x.com", role="eng")
+    # a STALE lib file no longer in the harness
+    (dest / "lib" / "stale_module.py").write_text("# old\n")
+    # local state that MUST be preserved
+    (dest / "private" / "personal-context" / "keep.md").write_text("mine\n")
+    (dest / ".applied.json").write_text('{"skills_version": 7}\n')
+    (dest / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
+    (dest / ".claude" / "skills" / "materialized.md").write_text("from-control-plane\n")
+
+    update(dest)
+
+    assert not (dest / "lib" / "stale_module.py").exists()       # stale removed
+    assert (dest / "lib" / "freshness.py").exists()              # real lib present
+    assert (dest / "private" / "personal-context" / "keep.md").read_text() == "mine\n"
+    assert (dest / ".applied.json").read_text() == '{"skills_version": 7}\n'
+    assert (dest / ".claude" / "skills" / "materialized.md").read_text() == "from-control-plane\n"
+    assert run_git(dest, "config", "user.email").stdout.strip() == "ada@x.com"
