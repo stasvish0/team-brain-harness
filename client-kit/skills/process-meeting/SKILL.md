@@ -26,7 +26,7 @@ Use this after a meeting whose raw transcript is saved under `private/personal-m
 
    If one plausibly matches this meeting (reconcile title variants like "standup" vs "daily standup" yourself), reuse its id. Otherwise create `<date>-<slugify(title)>`.
 
-4. **Determine your author-id** (one stable identity, used everywhere): a handle from your `private/personal-context` profile if you have one; otherwise the slugified local-part of `git config user.email` (e.g. `alice@x.com` -> `alice`).
+4. **Determine your author-id**: read the `handle:` field in `private/personal-context/profile.md` (seeded by the installer as the slugified local-part of your git email). If for some reason there is no profile, fall back to the slugified local-part of `git config user.email` (e.g. `alice@x.com` -> `alice`).
 
 5. **Write the contribution** to `meetings/<id>/_inbox/<author-id>.md` with exactly a sentinel comment then a fenced json block:
 

@@ -92,3 +92,22 @@ def _prompt_if_missing(value, label):
         return input(f"{label}: ").strip()
     print(f"error: --{label} is required (stdin is not a TTY)", file=sys.stderr)
     raise SystemExit(2)
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Install or update a team-brain-harness client.")
+    ap.add_argument("--update", metavar="DEST", help="update an existing client's code in place")
+    ap.add_argument("remote_url", nargs="?", help="the live hive git URL")
+    ap.add_argument("dest", nargs="?", help="where to create the client")
+    ap.add_argument("--name"); ap.add_argument("--email"); ap.add_argument("--role")
+    a = ap.parse_args()
+    if a.update:
+        update(a.update)
+    elif a.remote_url and a.dest:
+        name = _prompt_if_missing(a.name, "name")
+        email = _prompt_if_missing(a.email, "email")
+        role = _prompt_if_missing(a.role, "role")
+        install(a.remote_url, a.dest, name, email, role)
+    else:
+        print("usage: python3 tools/install.py <remote-url> <dest> [--name N --email E --role R]\n"
+              "       python3 tools/install.py --update <dest>", file=sys.stderr)
+        raise SystemExit(2)

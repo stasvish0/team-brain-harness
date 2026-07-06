@@ -65,13 +65,24 @@ Done. The team brain exists. Everything members add flows into this repo.
 
 ## Part B: Member, join the team brain
 
-One command provisions your local client from the hive URL your admin gave you:
+One command installs your local client from the hive URL your admin gave you. Pass your identity so the installer can seed your profile:
 
 ```bash
-python3 tools/setup_client.py git@github.com:ACME/acme-hive.git ~/acme-brain
+python3 tools/install.py git@github.com:ACME/acme-hive.git ~/acme-brain \
+  --name "Ada Lovelace" --email ada@acme.com --role engineer
 ```
 
-This clones the hive, vendors the sync hooks and the git-sync library, and builds your private tree. You now have:
+The installer runs a short preflight (git present, Python 3.11+, GitHub SSH reachable), clones the hive, vendors the sync hooks and the git-sync library, builds your private tree, and seeds `private/personal-context/profile.md` with your name, a stable `handle:` (the slugified local-part of your email), and your `role:`.
+
+> **SSH-key note.** If `ssh -T git@github.com` fails, GitHub can't authenticate you yet. Generate a key and register it, then re-run the command above:
+>
+> ```bash
+> ssh-keygen -t ed25519 -C "ada@acme.com"
+> ```
+>
+> Paste the contents of `~/.ssh/id_ed25519.pub` at [github.com/settings/keys](https://github.com/settings/keys), then re-run the installer.
+
+This gives you your private tree. You now have:
 
 ```text
 ~/acme-brain/                 # your clone of the shared team brain (syncs)
@@ -89,6 +100,18 @@ This clones the hive, vendors the sync hooks and the git-sync library, and build
 ```
 
 Point your AI assistant (e.g. Claude Code) at `~/acme-brain` and you are ready.
+
+**First run.** With your assistant pointed at `~/acme-brain`, run the `/onboarding` skill once. It reads the profile the installer seeded and interviews you briefly (primary domain, current focus, what you own, key collaborators) to finish it. Your profile stays private and never syncs.
+
+### Keeping your client up to date
+
+Harness-owned client code (the sync hooks, the git-sync library, local settings, the publish allowlist) evolves over time. Refresh it in place without disturbing your notes:
+
+```bash
+python3 tools/install.py --update ~/acme-brain
+```
+
+This re-vendors only the harness-owned code; your private notes, your identity, and control-plane state are preserved. This is also how you clear a `min_client_version` block: when a session-start pull safe-halts because your client is too old for a breaking migration, run `--update` against a freshly pulled harness, then restart.
 
 ---
 
@@ -132,7 +155,7 @@ To change the shared system for everyone, edit `CONTROL/manifest.json` (bump the
 - **New required MCP:** add a `{ "name": ..., "how": ... }` entry to `required_mcps`. Each client announces it once at session start.
 - **Standing rules:** edit `CONTROL/policy.md` and bump `policy_version`. Each client reloads it at session start.
 
-Breaking migrations carry a `min_client_version`; clients whose harness is too old safe-halt (a `.control-block` file, a clear message) instead of applying it, until they re-run `setup_client` against a newer harness.
+Breaking migrations carry a `min_client_version`; clients whose harness is too old safe-halt (a `.control-block` file, a clear message) instead of applying it, until they run `python3 tools/install.py --update <clone>` against a newer harness.
 
 ### Purge leaked data (admin)
 
@@ -167,7 +190,9 @@ sequenceDiagram
 | Goal | Command |
 |------|---------|
 | Create a live hive | `python3 tools/instantiate.py <dest>` |
-| Provision a member client | `python3 tools/setup_client.py <hive-git-url> <dest>` |
+| Install a member client | `python3 tools/install.py <hive-url> <dest> --name --email --role` |
+| Update your client code | `python3 tools/install.py --update <clone>` |
+| Finish your profile (first run) | run the `/onboarding` skill |
 | Pull latest (manual) | `python3 .claude/hooks/sync_pull.py --repo <clone>` |
 | Publish shared changes | `python3 .claude/hooks/publish.py --repo <clone> --allowlist <clone>/publish_allowlist.txt --message "..."` |
 | Process a meeting into a shared contribution | run the `/process-meeting` skill in your assistant |
