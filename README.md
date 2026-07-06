@@ -1,6 +1,6 @@
 # team-brain-harness
 
-![status](https://img.shields.io/badge/status-3%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)
+![status](https://img.shields.io/badge/status-4%2F5%20sub--projects-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![tests](https://img.shields.io/badge/tests-97%20passing-brightgreen)
 
 A shared, git-synced "team brain" that every member's AI assistant reads from and writes to, so the whole team's knowledge is one pull away, while each person's private notes never leave their machine.
 
@@ -56,6 +56,7 @@ flowchart LR
 - **Publish (upstream):** an explicit hook stages only allowlisted shared paths, commits, and pushes with fetch-rebase-retry so concurrent publishers never overwrite each other.
 - **Privacy is structural:** `private/` is gitignored *and* excluded locally, and publish never does `git add -A`. Two independent guards.
 - **Control plane (admin-driven evolution):** an admin edits `CONTROL/manifest.json` plus migrations, skills, or policy and pushes; each client reconciles on session start, applying safe changes (structure migrations, the skills mirror, policy reload, MCP announcements) and gating with a safe-halt when its harness is too old for a breaking migration.
+- **Freshness (knowledge that ages):** shared notes carry a `last_verified` date in their front-matter; the session-start hook warns about notes that have gone stale (past their type's horizon) or expired (past an optional `review_by`). Run the `/hive-audit` skill to re-verify the ones still true and stamp them fresh (a single allowlisted push), while it surfaces near-duplicates for you to merge. Horizons per note type live in `CONTROL/health.json`.
 
 ## A day in the life: the standup
 
@@ -105,7 +106,7 @@ The full design and the implementation plan live in the repo:
 - Design spec: [docs/superpowers/specs/2026-07-03-group-hive-brain-design.md](docs/superpowers/specs/2026-07-03-group-hive-brain-design.md)
 - Walking-skeleton plan: [docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md](docs/superpowers/plans/2026-07-03-walking-skeleton-vault-and-hooks.md)
 
-**Status:** this repo implements **sub-projects 1-3 of 5**: the walking skeleton (the vault + the two sync hooks + explicit-publish safety + concurrency-safe push), the meeting roll-up (the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note), and the control plane (an admin edits `CONTROL/`, clients converge on session start applying safe changes, with a gated safe-halt when a client is too old for a breaking migration). The remaining sub-projects are: 4) TTL/freshness, 5) the full installer and onboarding.
+**Status:** this repo implements **sub-projects 1-4 of 5**: the walking skeleton (the vault + the two sync hooks + explicit-publish safety + concurrency-safe push), the meeting roll-up (the `/process-meeting` skill + deterministic, idempotent merge of many attendees' contributions into one canonical note), the control plane (an admin edits `CONTROL/`, clients converge on session start applying safe changes, with a gated safe-halt when a client is too old for a breaking migration), and TTL/freshness (notes carry `last_verified`, the session-start hook warns on stale/expired notes, and the `/hive-audit` skill re-verifies and stamps them with horizons in `CONTROL/health.json`). The remaining sub-project is: 5) the full installer and onboarding.
 
 ## Development
 
@@ -115,7 +116,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pytest -q
 ```
 
-A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (72 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop, the meeting roll-up, the control-plane reconciliation, and the privacy invariant.
+A virtualenv is used because system Python is often PEP 668 externally-managed. The suite (97 tests) exercises real git behavior against temporary repositories, including the end-to-end publish/pull loop, the meeting roll-up, the control-plane reconciliation, the freshness re-verify loop, and the privacy invariant.
 
 ## License
 

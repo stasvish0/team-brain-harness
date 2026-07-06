@@ -115,6 +115,14 @@ It prints `pushed` when something went up, or `nothing-to-publish` when nothing 
 
 **Process a meeting into a shared record.** After a meeting whose raw transcript you saved under `private/personal-meetings/`, run the `/process-meeting` skill in your assistant. It summarizes your transcript into a structured contribution (decisions, action items, notes), writes it to `meetings/<id>/_inbox/<you>.md`, and publishes it. The raw transcript never leaves your machine; only the summary is shared. You do not merge by hand: the next teammate's session-start hook automatically rolls up every attendee's contribution into one canonical note (`meetings/<id>/<slug>.md`), deletes the inbox, and pushes. Re-runs and late contributions fold into the same note, deterministically.
 
+### Keeping knowledge fresh
+
+Shared knowledge ages. Write evergreen notes from the `templates/knowledge-note.md` template so they carry a `last_verified` date (and, optionally, a hard `review_by` expiry) in their front-matter. On every session start, the freshness check warns you about notes that have passed their type's horizon (stale) or their `review_by` (expired), so nothing silently rots.
+
+When you see those warnings, run the `/hive-audit` skill in your assistant. It walks the stale and expired notes, and for each one still true it stamps `last_verified` to today and publishes the confirmations in one allowlisted push; anything no longer true it surfaces to you rather than editing shared knowledge on its own. It also reports near-duplicate notes for you to merge.
+
+Horizons per note type (how many days before a `type` goes stale) are configured in `CONTROL/health.json`, along with the default horizon and which roots are scanned. Tuning them is an admin task.
+
 ### Admin: evolve the hive
 
 To change the shared system for everyone, edit `CONTROL/manifest.json` (bump the relevant version) and add the change alongside it, then push. Every client converges on its next session start:
@@ -163,6 +171,8 @@ sequenceDiagram
 | Pull latest (manual) | `python3 .claude/hooks/sync_pull.py --repo <clone>` |
 | Publish shared changes | `python3 .claude/hooks/publish.py --repo <clone> --allowlist <clone>/publish_allowlist.txt --message "..."` |
 | Process a meeting into a shared contribution | run the `/process-meeting` skill in your assistant |
+| Re-verify stale notes (audit) | run the `/hive-audit` skill |
+| Tune freshness horizons (admin) | edit `CONTROL/health.json` |
 | Evolve the hive (admin) | edit `CONTROL/` + push |
 | Purge leaked data (admin) | `python3 tools/purge.py <path> --force` |
 | Run the test suite | `./.venv/bin/python -m pytest -q` |
