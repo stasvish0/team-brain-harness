@@ -157,3 +157,15 @@ def test_find_duplicates_none_when_all_distinct(tmp_path):
     (tmp_path / "knowledge" / "a.md").write_text("---\nlast_verified: 2026-07-01\n---\nalpha\n")
     (tmp_path / "knowledge" / "b.md").write_text("---\nlast_verified: 2026-07-01\n---\nbeta\n")
     assert find_duplicates(tmp_path, cfg) == []
+
+
+def test_stamp_ignores_body_line_that_looks_like_frontmatter(tmp_path):
+    f = tmp_path / "n.md"
+    f.write_text("---\ntype: reference\nlast_verified: 2025-01-01\n---\n"
+                 "prose mentioning last_verified: 2099-12-31 in the body\n")
+    stamp(f, date(2026, 7, 5))
+    text = f.read_text()
+    # only the front-matter line was updated
+    assert "last_verified: 2026-07-05" in text
+    assert "last_verified: 2099-12-31 in the body" in text  # body untouched
+    assert "2025-01-01" not in text
