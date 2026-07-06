@@ -15,13 +15,13 @@ LIB = ROOT / "lib"
 PRIVATE_DIRS = ["personal-meetings", "personal-context", "personal-decisions",
                 "personal-docs", "personal-drafts", "personal-projects", "personal-reviews"]
 
-def setup_client(remote_url, dest):
+def setup_client(remote_url, dest, name="Member", email="member@example.com"):
     """Clone the live hive, vendor hooks + lib, and build the gitignored private tree.
     Minimal stand-in for the full installer (sub-project 5); no SSH/role handling."""
     dest = Path(dest)
     subprocess.run(["git", "clone", str(remote_url), str(dest)], check=True)
-    run_git(dest, "config", "user.email", "member@example.com")
-    run_git(dest, "config", "user.name", "Member")
+    run_git(dest, "config", "user.email", email)
+    run_git(dest, "config", "user.name", name)
     shutil.copytree(CLIENT_KIT / ".claude", dest / ".claude", dirs_exist_ok=True)
     shutil.copy2(CLIENT_KIT / "publish_allowlist.txt", dest / "publish_allowlist.txt")
     shutil.copytree(LIB, dest / "lib", dirs_exist_ok=True)

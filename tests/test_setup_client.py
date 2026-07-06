@@ -14,3 +14,11 @@ def test_setup_client_creates_private_tree_and_hooks(bare_remote, tmp_path):
     out = subprocess.run(["git", "-C", str(clone), "status", "--porcelain"],
                          capture_output=True, text=True, check=True).stdout
     assert "private/" not in out
+
+
+def test_setup_client_sets_provided_identity(bare_remote, tmp_path):
+    from tools.setup_client import setup_client
+    from lib.gitsync import run_git
+    d = setup_client(str(bare_remote), tmp_path / "cid", name="Ada", email="ada@x.com")
+    assert run_git(d, "config", "user.email").stdout.strip() == "ada@x.com"
+    assert run_git(d, "config", "user.name").stdout.strip() == "Ada"
