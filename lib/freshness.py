@@ -8,6 +8,8 @@ import re
 from datetime import date
 from pathlib import Path
 
+from lib.gitsync import run_git, push_paths
+
 DEFAULT_SCAN_ROOTS = ["org", "product", "engineering", "design", "customers",
                       "market", "knowledge", "projects", "decisions", "private"]
 
@@ -159,3 +161,22 @@ def find_duplicates(repo, config):
             h = _normalized_hash(p.read_text())
             buckets.setdefault(h, []).append(p.relative_to(repo).as_posix())
     return [sorted(paths) for paths in buckets.values() if len(paths) > 1]
+
+
+def commit_stamps(repo, paths, today, remote="origin", branch="main"):
+    """Stamp each note to today; push the shared ones (not under private/) as one
+    transaction. On a push conflict, reset to the remote tip and re-raise."""
+    repo = Path(repo)
+    shared = []
+    for rel in paths:
+        stamp(repo / rel, today)
+        if Path(rel).parts[:1] != ("private",):
+            shared.append(rel)
+    if shared:
+        try:
+            push_paths(repo, "chore: re-verify notes (stamp last_verified)",
+                       sorted(shared), remote=remote, branch=branch)
+        except RuntimeError:
+            run_git(repo, "reset", "--hard", f"{remote}/{branch}", check=False)
+            raise
+    return sorted(shared)
