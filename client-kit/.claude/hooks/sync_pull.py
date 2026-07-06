@@ -15,6 +15,7 @@ sys.path.insert(0, str(_repo_root(__file__)))
 from lib.gitsync import pull
 from lib.control_plane import apply_control_plane
 from lib.meeting_rollup import roll_up_all
+from lib.freshness import freshness_report
 
 def main():
     ap = argparse.ArgumentParser()
@@ -40,6 +41,9 @@ def main():
         print(cp["policy_text"])
     for name, status in roll_up_all(a.repo):
         print(f"rollup {name}: {status}")
+    from datetime import date
+    for line in freshness_report(a.repo, date.today()):
+        print(line)
 
 if __name__ == "__main__":
     main()

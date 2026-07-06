@@ -2,7 +2,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from lib.gitsync import run_git
-from lib.freshness import commit_stamps
+from lib.freshness import commit_stamps, freshness_report
 from tests.conftest import init_identity
 
 def _clone(remote, dest):
@@ -42,3 +42,21 @@ def test_commit_stamps_push_conflict_propagates_and_resets(bare_remote, tmp_path
         commit_stamps(a, ["engineering/adr.md"], date(2026, 7, 5))
     assert run_git(a, "status", "--porcelain").stdout.strip() == ""
     assert "last_verified: 2025-01-01" in (a / "engineering" / "adr.md").read_text()
+
+def test_freshness_report_lists_stale_and_expired(tmp_path):
+    import json
+    (tmp_path / "CONTROL").mkdir()
+    (tmp_path / "CONTROL" / "health.json").write_text(json.dumps(
+        {"default_horizon_days": 180, "horizons": {}, "scan_roots": ["engineering"]}))
+    _tracked(tmp_path, "engineering/old.md", "2025-01-01")  # stale vs today
+    lines = freshness_report(tmp_path, date(2026, 7, 5))
+    assert any("freshness:" in ln and "stale" in ln for ln in lines)
+    assert any("engineering/old.md" in ln for ln in lines)
+
+def test_freshness_report_empty_when_all_fresh(tmp_path):
+    import json
+    (tmp_path / "CONTROL").mkdir()
+    (tmp_path / "CONTROL" / "health.json").write_text(json.dumps(
+        {"default_horizon_days": 180, "horizons": {}, "scan_roots": ["engineering"]}))
+    _tracked(tmp_path, "engineering/new.md", "2026-07-01")
+    assert freshness_report(tmp_path, date(2026, 7, 5)) == []

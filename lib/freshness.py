@@ -163,6 +163,24 @@ def find_duplicates(repo, config):
     return [sorted(paths) for paths in buckets.values() if len(paths) > 1]
 
 
+def freshness_report(repo, today):
+    """Read-only. Return a list of report lines (empty if nothing stale/expired)."""
+    cfg = read_health_config(repo)
+    results = scan(repo, cfg, today)
+    flagged = [r for r in results if r["status"] in ("stale", "expired")]
+    if not flagged:
+        return []
+    n_stale = sum(1 for r in flagged if r["status"] == "stale")
+    n_exp = sum(1 for r in flagged if r["status"] == "expired")
+    lines = [f"freshness: {n_stale} stale, {n_exp} expired  (run /hive-audit to re-verify)"]
+    for r in sorted(flagged, key=lambda r: r["path"]):
+        if r["status"] == "stale":
+            lines.append(f"  STALE   {r['path']}  (verified {r['age_days']}d ago)")
+        else:
+            lines.append(f"  EXPIRED {r['path']}")
+    return lines
+
+
 def commit_stamps(repo, paths, today, remote="origin", branch="main"):
     """Stamp each note to today; push the shared ones (not under private/) as one
     transaction. On a push conflict, reset to the remote tip and re-raise."""
