@@ -474,6 +474,11 @@ def test_install_then_hook_runs_then_update(tmp_path):
 
 - [ ] **Step 5: Run the e2e + full suite.** Debug until green. (`instantiate` vendors `client-kit/skills` -> `CONTROL/skills`, so `onboarding` propagates like `process-meeting`/`hive-audit`; `install` -> `setup_client` -> `sync_skills` materializes it into `.claude/skills`.)
 
+- [ ] **Step 5b: Point the `min_client_version` gate at `--update`.** Now that `--update` exists, the gate's guidance should reference it:
+  - In `client-kit/.claude/hooks/sync_pull.py`, change the blocked-branch line `print("Update your client (re-run setup_client with the latest harness), then restart.")` to `print("Update your client: run  python3 tools/install.py --update <this-clone>  then restart.")`.
+  - In `docs/getting-started.md`, update any existing "re-run `setup_client`" guidance for a blocked/too-old client to reference `python3 tools/install.py --update <clone>`.
+  (The control-plane e2e/rollup tests assert substrings that do not include this exact sentence, so the wording change is safe; re-run the suite to confirm.)
+
 - [ ] **Step 6: Docs**
 - `README.md`: status badge -> `5%2F5%20sub--projects%20(complete)` (or similar "complete"); tests badge to the final count (run the suite, use the number, also fix the in-prose count); the member quick start uses `python3 tools/install.py <hive-url> <dest> --name --email --role`; the Status section marks all five sub-projects done (the harness is feature-complete); add an installer/onboarding bullet under How it works.
 - `docs/getting-started.md`: rewrite Part B to use `install.py` (with flags and the SSH-key note), add a "Keeping your client up to date" subsection (`python3 tools/install.py --update <clone>`), and add the `/onboarding` first-run step. Add command-reference rows: "Install a member client" -> `python3 tools/install.py <hive-url> <dest> --name --email --role`; "Update your client code" -> `python3 tools/install.py --update <clone>`; "Finish your profile (first run)" -> run the `/onboarding` skill. (Keep the existing `setup_client` row or note install.py is the recommended member path.)
