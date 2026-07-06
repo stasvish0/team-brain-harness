@@ -1,6 +1,7 @@
 """Freshness / TTL: track last_verified on notes, warn on staleness, re-verify
 via the /hive-audit skill. Stdlib only. See
 docs/superpowers/specs/2026-07-05-freshness-design.md."""
+import hashlib
 import json
 import os
 import re
@@ -125,3 +126,36 @@ def stamp(path, today):
             _atomic_write(path, "".join(lines))
             return
     raise ValueError(f"no last_verified line in front-matter: {path}")
+
+
+def _body_after_frontmatter(text):
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return "\n".join(lines[i + 1:])
+    return text
+
+
+def _normalized_hash(text):
+    body = _body_after_frontmatter(text)
+    norm = re.sub(r"\s+", " ", body).strip().lower()
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()
+
+
+def find_duplicates(repo, config):
+    repo = Path(repo)
+    buckets = {}
+    for root in config.get("scan_roots", DEFAULT_SCAN_ROOTS):
+        base = repo / root
+        if not base.is_dir():
+            continue
+        for p in sorted(base.rglob("*.md")):
+            if not p.is_file():
+                continue
+            fm = parse_frontmatter(p)
+            if not fm or "last_verified" not in fm:
+                continue  # tracked notes only
+            h = _normalized_hash(p.read_text())
+            buckets.setdefault(h, []).append(p.relative_to(repo).as_posix())
+    return [sorted(paths) for paths in buckets.values() if len(paths) > 1]

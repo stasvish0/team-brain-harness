@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from lib.freshness import read_health_config, parse_frontmatter, DEFAULT_SCAN_ROOTS, note_status, scan, stamp
+from lib.freshness import find_duplicates
 
 CFG = {"default_horizon_days": 180, "horizons": {"project": 30, "decision": 365}}
 
@@ -138,3 +139,21 @@ def test_stamp_raises_without_last_verified_line(tmp_path):
     f.write_text("---\ntype: reference\n---\nbody\n")
     with pytest.raises(ValueError):
         stamp(f, date(2026, 7, 5))
+
+
+def test_find_duplicates_clusters_near_identical(tmp_path):
+    cfg = {"scan_roots": ["knowledge"], "default_horizon_days": 180, "horizons": {}}
+    _note(tmp_path, "knowledge/a.md", "2026-07-01", extra="")  # body "body"
+    _note(tmp_path, "knowledge/b.md", "2026-06-01", extra="")  # body "body" (dup, diff frontmatter)
+    (tmp_path / "knowledge" / "c.md").write_text(
+        "---\ntype: reference\nlast_verified: 2026-07-01\n---\ntotally different content\n")
+    clusters = find_duplicates(tmp_path, cfg)
+    assert clusters == [["knowledge/a.md", "knowledge/b.md"]]
+
+
+def test_find_duplicates_none_when_all_distinct(tmp_path):
+    cfg = {"scan_roots": ["knowledge"], "default_horizon_days": 180, "horizons": {}}
+    (tmp_path / "knowledge").mkdir(parents=True)
+    (tmp_path / "knowledge" / "a.md").write_text("---\nlast_verified: 2026-07-01\n---\nalpha\n")
+    (tmp_path / "knowledge" / "b.md").write_text("---\nlast_verified: 2026-07-01\n---\nbeta\n")
+    assert find_duplicates(tmp_path, cfg) == []
